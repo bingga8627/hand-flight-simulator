@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#080f16">
+  <meta name="description" content="양손 제스처로 조종하는 Canvas 1인칭 비행 시뮬레이터">
+  <title>AERONAUT — Hand Flight Simulator</title>
+  <link rel="stylesheet" href="style.css?v=20260909-17">
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">⌁</span><div>AERONAUT <small>HAND FLIGHT / 01</small></div></div>
+      <div class="flight-label"><span class="dot"></span><span id="header-mode">FREE FLIGHT</span><span class="divider">/</span> CANVAS SIMULATOR</div>
+      <div class="actions">
+        <button id="reset-button" class="quiet">비행 초기화</button>
+        <button id="camera-button" class="primary">웹캠 연결 <span>↗</span></button>
+      </div>
+    </header>
+
+    <nav class="training-bar" aria-label="비행 모드">
+      <div class="training-modes"><button id="free-flight-button" class="quiet" aria-pressed="true">자유 비행</button><button id="takeoff-button" class="quiet" aria-pressed="false">지상 출발</button><button id="approach-button" class="quiet" aria-pressed="false">착륙 연습</button><button id="mission-button" class="quiet" aria-pressed="false">통합 미션</button></div>
+      <div class="training-controls"><span id="mode-label">FREE FLIGHT</span><button id="audio-button" class="quiet" aria-pressed="true">사운드 ON</button><button id="pause-button" class="quiet">일시정지</button><button id="brake-button" class="quiet" aria-pressed="false" disabled>브레이크 OFF</button></div>
+    </nav>
+    <section id="flight" class="flight" aria-label="1인칭 비행 시뮬레이터">
+      <canvas id="flight-canvas" aria-label="하늘, 지면과 조종석이 표시되는 비행 화면"></canvas>
+      <div class="mission"><span>TRAINING AIRSPACE</span><strong>당신의 손으로, 비행하세요.</strong><small>오른손은 조종간 · 왼손은 스로틀</small></div>
+      <div class="heading"><span>270</span><span>285</span><strong id="heading-value">300</strong><span>315</span><span>330</span><i>▼</i></div>
+      <div id="lesson-hud" class="lesson-hud" hidden>
+        <div class="lesson-heading"><strong id="phase-label">지상 대기</strong><span id="lesson-route">RWY 30 / 12</span></div>
+        <div class="approach-metrics"><span><span id="distance-label">활주로</span><b id="runway-distance">—</b></span><span><span id="lateral-label">중심선</span><b id="lateral-error">—</b></span><span><span id="altitude-label">진입 높이</span><b id="glide-error">—</b></span><span>목표 속도<b id="target-speed">—</b></span><span>유도<b id="director-status">—</b></span></div>
+        <p id="lesson-instruction"></p>
+      </div>
+      <div id="pause-notice" class="pause-notice" hidden>일시정지 · 위의 비행 시작을 누르세요</div>
+      <div id="flight-warning" class="flight-warning" role="alert" hidden>
+        <strong>STALL</strong><span>기수를 낮추고 출력을 올리세요</span>
+      </div>
+      <section id="flight-result" class="flight-result" tabindex="-1" aria-labelledby="result-title" hidden>
+        <span class="result-eyebrow">FLIGHT DEBRIEF</span><h2 id="result-title"></h2><p id="result-description"></p><div id="result-metrics"></div><button id="retry-button" class="primary">같은 훈련 다시 시작</button>
+      </section>
+
+      <aside class="camera-panel">
+        <div class="panel-title"><span><i id="camera-dot" class="dot off"></i> HAND TRACKING</span><span id="hand-count">0 / 2</span></div>
+        <div class="camera-feed">
+          <video id="webcam" autoplay playsinline muted></video>
+          <canvas id="landmark-canvas"></canvas>
+          <div id="camera-placeholder"><span>◎</span>웹캠 연결 대기<small>양손이 화면에 들어오도록 앉아주세요</small></div>
+          <span class="feed-corner tl"></span><span class="feed-corner br"></span>
+        </div>
+        <div class="camera-settings">
+          <label for="camera-select">카메라 장치</label>
+          <select id="camera-select"><option value="">브라우저 기본 카메라</option></select>
+          <p id="camera-device-status" role="status">웹캠 연결 후 장치 이름이 표시됩니다.</p>
+          <details><summary>영상 대신 꺼짐 그림이 보이나요?</summary><p>위 목록에서 실제 웹캠을 선택하세요. 같은 그림이 계속 보이면 카메라 가림막, 카메라 끄기 키, 제조사 앱의 프라이버시 모드를 확인하세요.</p></details>
+        </div>
+        <label class="swap-label"><input id="swap-hands" type="checkbox"> 왼손 / 오른손 인식 교환</label>
+      </aside>
+
+      <div class="speed readout"><span>SPEED <small>KTS</small></span><strong id="speed-value">120</strong><div class="instrument-rule"></div><small>AIRSPEED</small></div>
+      <div class="altitude readout"><span>ALTITUDE <small>FT</small></span><strong id="altitude-value">2,400</strong><div class="instrument-rule"></div><small id="vertical-speed">V/S +0 FT/MIN</small></div>
+
+      <aside class="throttle-panel">
+        <div class="panel-title">THROTTLE <strong id="throttle-value">55%</strong></div>
+        <div class="throttle-body"><div class="throttle-ticks"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div><div class="throttle-track"><div id="throttle-fill"></div><div id="throttle-handle"></div></div><div class="throttle-caption">L / LEFT HAND</div></div>
+        <p>손을 올리면 출력 증가<br>내리면 출력 감소</p>
+      </aside>
+
+      <div class="attitude"><span>PITCH <strong id="pitch-value">+0.0°</strong></span><span>ROLL <strong id="roll-value">+0.0°</strong></span><span>ELEVATOR <strong id="elevator-value">0%</strong></span><span>INPUT <strong id="depth-value">PINCH</strong></span></div>
+      <div id="stick-hint" class="stick-hint">먼저 오른쪽 위의 웹캠 연결을 눌러주세요</div>
+      <div class="cockpit-label left">AERONAUT<br><span>EXPERIMENTAL / MK.01</span></div>
+      <div class="cockpit-label right"><span>FLIGHT CONTROL</span><br>GESTURE LINK</div>
+      <div id="message" class="message" role="status" aria-live="polite">웹캠 연결을 누르면 손 추적이 시작됩니다.</div>
+      <a id="local-server-link" href="http://127.0.0.1:5500/" target="_blank" rel="noopener" hidden>로컬 서버에서 비행 화면 열기 ↗</a>
+    </section>
+
+    <footer class="statusbar">
+      <div><i id="right-dot" class="dot off"></i>RIGHT HAND: <b id="right-status">NOT DETECTED</b></div>
+      <div>STICK: <b id="stick-status">RELEASED</b></div>
+      <div><span id="pinch-label">AUTO:</span> <b id="pinch-status">READY</b></div>
+      <div><i id="left-dot" class="dot off"></i>LEFT HAND: <b id="left-status">NOT DETECTED</b></div>
+      <span class="local-label">LOCAL PROCESSING</span>
+    </footer>
+    <section class="calibration-bar" aria-label="오른손 중심 설정">
+      <div><strong>오른손 표시 중심 설정 · 선택 사항</strong><p id="calibration-status" role="status">이지 조종은 손을 보여주면 자동으로 시작합니다. C 키는 R 표시 위치를 맞출 때만 사용합니다.</p></div>
+      <progress id="calibration-progress" max="1" value="0" aria-label="손 위치 설정 진행률"></progress>
+      <button id="calibrate-button" class="quiet" aria-keyshortcuts="c" title="C 키로 중심 설정 시작 / 취소" disabled>현재 자세로 설정 [C]</button>
+      <button id="clear-calibration-button" class="quiet" disabled>기본 위치로</button>
+    </section>
+    <section class="depth-panel" aria-label="오른손 Pitch 조종 입력">
+      <div><strong>PITCH 입력 확인</strong><span id="depth-status">오른손으로 핀치하면 현재 거리가 자동 설정됩니다</span><small id="distance-debug">상대거리 — · 핀치하면 기준 자동 설정</small></div>
+      <div class="depth-display"><div class="depth-scale" role="meter" id="depth-meter" aria-label="Pitch 조종 입력 미리보기" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0"><i id="depth-marker"></i></div><div class="depth-labels"><span id="pitch-negative-label">손 아래로 · 하강</span><span>중립</span><span id="pitch-positive-label">손 위로 · 상승</span></div></div>
+      <div class="depth-options"><label>조종 방식 <select id="control-mode"><option value="easy" selected>이지 · 손 위치</option><option value="distance">고급 · 핀치/거리</option></select></label><label>반응 속도 <select id="control-response"><option value="smooth">부드럽게</option><option value="normal">보통</option><option value="fast" selected>빠르게</option></select></label><label><input id="vertical-pitch-assist" type="checkbox" disabled> 거리 모드 위아래 보조</label></div>
+    </section>
+    <section class="instructions" aria-label="조작 방법">
+      <div><span>01</span><p><strong>웹캠 연결</strong>카메라를 정면에 두고 양손을 보여주세요.</p></div>
+      <div><span>02</span><p><strong>오른손 · 이지 조종</strong>손이 처음 잡힌 위치가 자동 중립입니다.<br>좌우로 Roll, 위로 움직이면 상승, 아래로 움직이면 하강합니다.</p></div>
+      <div><span>03</span><p><strong>왼손 · 출력 조절</strong>손을 위아래로 움직여 속도를 조절하세요.<br>손을 화면 밖으로 빼면 현재 출력을 유지합니다.</p></div>
+    </section>
+  </main>
+  <!-- 일반 스크립트로 시작해야 파일을 직접 열어도 실행 방법을 안내할 수 있습니다.
+       MediaPipe는 main.js 내부에서 필요한 시점에 동적 import합니다. -->
+  <script defer src="main.js?v=20260909-32"></script>
+</body>
+</html>
