@@ -75,7 +75,7 @@ const mission = { checkpoint:0, elapsed:0, returning:false, gateEffect:null, gat
 const stick = { x: 0, y: 0, grabbed: false, anchor: null, depthAnchor: null, depthShape: null };
 const sound = { context:null, master:null, engineGain:null, engineOscillator:null, engineHarmonic:null, engineFilter:null, engineNoise:null, engineNoiseGain:null, engineNoiseFilter:null, engineTurbine:null, engineTurbineGain:null, engineAir:null, engineAirGain:null, engineAirFilter:null, engineCompressor:null, muted:false };
 const effects = { stall:false, lastStallTone:0 };
-const landingAlerts = { sink:false, align:false, lastSpoken:0 };
+const landingAlerts = { sink:false, lastSpoken:0 };
 function newHand() { return { detected: false, point: null, pinch: false, lastSeen: 0, palmScale: null, palmShape: null, depthValid: false }; }
 const hands = { Right: newHand(), Left: newHand() };
 let width = 1, height = 1, dpr = 1;
@@ -221,7 +221,7 @@ function startLesson(mode) {
       : { speed: 120, altitude: 2400, throttle: 55, pitch: 0 };
   Object.assign(flight, preset, { roll: 0, heading: RUNWAY.heading, verticalSpeed: 0, distance: 0 });
   effects.stall=false;effects.lastStallTone=0;$("flight-warning").hidden=true;
-  Object.assign(landingAlerts,{sink:false,align:false,lastSpoken:0});
+  Object.assign(landingAlerts,{sink:false,lastSpoken:0});
   if("speechSynthesis" in window) window.speechSynthesis.cancel();
   $("flight-result").hidden = true;
   $("flight").classList.toggle("training", mode !== "free");
@@ -333,17 +333,12 @@ function updateLandingCallouts() {
     return;
   }
 
-  const guidance=getLandingGuidance();
   const sinkDanger=flight.altitude<300&&-flight.verticalSpeed*60>RUNWAY.maxSink*60;
-  const alignDanger=flight.altitude<350&&(Math.abs(guidance.headingError)>10||Math.abs(lesson.x)>35);
-  landingAlerts.sink=sinkDanger;landingAlerts.align=alignDanger;
+  landingAlerts.sink=sinkDanger;
   if(now-landingAlerts.lastSpoken<LANDING_VOICE_COOLDOWN) return;
   if(sinkDanger) {
     landingAlerts.lastSpoken=now;
     playTone(240,.16,.12,0,"square");playTone(180,.18,.11,.18,"square");speakCallout("sink rate");
-  } else if(alignDanger) {
-    landingAlerts.lastSpoken=now;
-    playTone(330,.12,.10,0,"square");playTone(330,.12,.10,.2,"square");speakCallout("align runway");
   }
 }
 
