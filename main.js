@@ -57,6 +57,8 @@ const WIND_STREAK_START_SPEED = 70; // 이 속도부터 공기 흐름이 화면�
 const STALL_ENTER_SPEED = 58; // 공중에서 이 속도 아래면 실속 경고를 켭니다.
 const STALL_EXIT_SPEED = 68; // 속도가 충분히 회복된 뒤 경고를 꺼 깜빡임을 막습니다.
 const LANDING_VOICE_COOLDOWN = 1800; // 음성 경고가 서로 겹치지 않는 최소 간격(ms)
+const CITY_DRAW_DISTANCE = 5600; // 도시 건물을 그리는 전방 거리(m)
+const CITY_ROW_SPACING = 260; // 절차적으로 반복되는 도시 블록 간격(m)
 const KNOTS_TO_MPS = 0.514444;
 const FEET_TO_METERS = 0.3048;
 const RUNWAY_NEAR_CLIP = 3;
@@ -998,6 +1000,9 @@ function updateFlight(dt, now) {
   if (flight.altitude <= 0 && flight.verticalSpeed < 0) flight.verticalSpeed = 0;
   flight.altitude = Math.max(0, flight.altitude + flight.verticalSpeed * dt);
   flight.heading = (flight.heading + Math.sin(radians(flight.roll)) * flight.speed * 0.06 * dt + 360) % 360;
+  // 자유 비행에서도 지형 좌표를 실제 속도로 이동시켜 도시와 도로가 아래로 지나갑니다.
+  const direction=radians(flight.heading-RUNWAY.heading),travel=flight.speed*KNOTS_TO_MPS*dt;
+  lesson.x+=Math.sin(direction)*travel;lesson.z+=Math.cos(direction)*travel;
   flight.distance += flight.speed * dt * 0.0003;
 }
 
@@ -1045,12 +1050,7 @@ function drawWorld(now) {
   ground.addColorStop(0, "#718774"); ground.addColorStop(0.18, "#425f55"); ground.addColorStop(1, "#1c3734");
   ctx.fillStyle = ground; ctx.fillRect(-extent, 0, extent * 2, extent);
 
-  // 먼 산은 배경과 함께 회전하며, 낮은 대비로 HUD 가독성을 유지합니다.
-  const mountain = [[-extent, 4]];
-  for (let x = -extent; x <= extent; x += 45) {
-    mountain.push([x, -12 - 22 * Math.abs(Math.sin(x * 0.004 + 0.7)) - 14 * Math.sin(x * 0.012)]);
-  }
-  mountain.push([extent, 12]); path(mountain, "#6b858066");
+  drawMountainRanges(extent);
 
   // 순환 구름: 시간과 속도로 천천히 흘러가며 모두 수평선 위에 위치합니다.
   for (let i = 0; i < 12; i++) {
@@ -1077,6 +1077,7 @@ function drawWorld(now) {
     ctx.strokeStyle = `rgba(166,190,147,${depth * 0.17})`;
     ctx.beginPath(); ctx.moveTo(-extent, y); ctx.lineTo(extent, y); ctx.stroke();
   }
+  drawCityScenery();
   if (lesson.mode !== "free") drawRunway();
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointRings();
   // 먼 수평선: 기울기와 피치 방향을 쉽게 읽을 수 있는 얇은 빛.
@@ -1086,6 +1087,83 @@ function drawWorld(now) {
   drawWindStreaks(now);
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointNavigator();
   if (lesson.mode === "mission") drawGatePassEffect(now);
+}
+
+// 두 겹의 산맥은 서로 다른 속도로 흘러 가까운 능선과 먼 능선의 깊이를 만듭니다.
+function drawMountainRanges(extent) {
+  for(const layer of [0,1]) {
+    const step=layer?52:70;
+    const offset=flight.heading*(layer?5.2:2.8)+lesson.x*(layer?.035:.018);
+    const mountain=[[-extent,8]];
+    for(let x=-extent;x<=extent;x+=step) {
+      const sample=x+offset;
+      const peak=(layer?20:34)*Math.abs(Math.sin(sample*(layer?.0048:.0027)+(layer?1.1:.3)))
+        +(layer?11:18)*Math.abs(Math.sin(sample*(layer?.011:.0063)+.7));
+      mountain.push([x,-8-peak-(layer?0:13)]);
+    }
+    mountain.push([extent,10]);
+    path(mountain,layer?"#526f6f99":"#294b586e");
+  }
+}
+
+const sceneryNoise=value=>{
+  const wave=Math.sin(value*12.9898+78.233)*43758.5453;
+  return wave-Math.floor(wave);
+};
+
+function drawCityScenery() {
+  const roadBase=Math.floor(lesson.z/2000)*2000;
+  // 활주로 양옆의 간선도로와 반복되는 연결도로. 중앙 160m는 비워 이착륙 시야를 보존합니다.
+  runwayRectangle(-128,roadBase-5000,-117,roadBase+7000,"#263c3d99");
+  runwayRectangle(117,roadBase-5000,128,roadBase+7000,"#263c3d99");
+  for(let z=roadBase-4600;z<roadBase+6800;z+=520) {
+    runwayRectangle(-720,z,-80,z+7,"#2b414199");
+    runwayRectangle(80,z,720,z+7,"#2b414199");
+  }
+
+  const centerRow=Math.floor(lesson.z/CITY_ROW_SPACING),buildings=[];
+  for(let row=-9;row<=23;row++) {
+    const index=centerRow+row;
+    for(const side of [-1,1]) {
+      const seed=index*2.17+side*19.3;
+      const z=index*CITY_ROW_SPACING+(sceneryNoise(seed)-.5)*100;
+      const x=side*(175+sceneryNoise(seed+2.3)*470);
+      const camera=runwayCameraPoint(x,z);
+      if(camera.z<70||camera.z>CITY_DRAW_DISTANCE) continue;
+      buildings.push({camera,z,x,width:32+sceneryNoise(seed+4.1)*62,height:18+sceneryNoise(seed+7.7)*92,seed});
+    }
+  }
+  // 먼 건물부터 그려 가까운 건물이 자연스럽게 앞을 가리게 합니다.
+  buildings.sort((a,b)=>b.camera.z-a.camera.z);
+  buildings.forEach(drawCityBuilding);
+}
+
+function drawCityBuilding(building) {
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2,z=building.camera.z;
+  const centerX=building.camera.x*focal/z,halfWidth=building.width*focal/z*.5;
+  const bottom=eyeHeight*focal/z,top=(eyeHeight-building.height)*focal/z;
+  if(centerX+halfWidth<-width||centerX-halfWidth>width||top>height*1.3) return;
+  const haze=clamp(1-z/CITY_DRAW_DISTANCE,.16,.88);
+  const shade=sceneryNoise(building.seed+11);
+  ctx.save();ctx.globalAlpha=haze;
+  ctx.fillStyle=shade>.66?"#405653":shade>.33?"#30494b":"#253f46";
+  ctx.fillRect(centerX-halfWidth,top,halfWidth*2,Math.max(1,bottom-top));
+  // 햇빛을 받는 얇은 측면과 옥상으로 단순한 입체감을 냅니다.
+  const roof=Math.min(7,900/z),slant=Math.min(9,1100/z);
+  path([[centerX-halfWidth,top],[centerX+halfWidth,top],[centerX+halfWidth-slant,top-roof],[centerX-halfWidth+slant,top-roof]],"#65746a");
+  ctx.fillStyle="#172f36aa";ctx.fillRect(centerX+halfWidth*.55,top,halfWidth*.45,Math.max(1,bottom-top));
+
+  if(z<1900&&bottom-top>9&&halfWidth>3) {
+    ctx.fillStyle="#d9e7ad";ctx.globalAlpha=haze*.62;
+    const columns=halfWidth>9?3:2,rows=clamp(Math.floor((bottom-top)/9),1,5);
+    for(let row=0;row<rows;row++) for(let column=0;column<columns;column++) {
+      if(sceneryNoise(building.seed+row*7+column*3)<.44) continue;
+      const wx=centerX-halfWidth+(column+1)*(halfWidth*2)/(columns+1);
+      const wy=top+(row+1)*(bottom-top)/(rows+1);
+      ctx.fillRect(wx-1,wy-1,2,2);
+    }
+  }
+  ctx.restore();
 }
 
 // 화면 중심에서 바깥으로 퍼지는 짧은 선으로 고속 공기 흐름을 표현합니다.
