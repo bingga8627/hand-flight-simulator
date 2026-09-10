@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#080f16">
   <meta name="description" content="양손 제스처로 조종하는 Canvas 1인칭 비행 시뮬레이터">
   <title>AERONAUT — Hand Flight Simulator</title>
-  <link rel="stylesheet" href="style.css?v=20260909-17">
+  <link rel="stylesheet" href="style.css?v=20260911-18">
 </head>
 <body>
   <main class="app">
@@ -21,7 +21,7 @@
 
     <nav class="training-bar" aria-label="비행 모드">
       <div class="training-modes"><button id="free-flight-button" class="quiet" aria-pressed="true">자유 비행</button><button id="takeoff-button" class="quiet" aria-pressed="false">지상 출발</button><button id="approach-button" class="quiet" aria-pressed="false">착륙 연습</button><button id="mission-button" class="quiet" aria-pressed="false">통합 미션</button></div>
-      <div class="training-controls"><span id="mode-label">FREE FLIGHT</span><button id="audio-button" class="quiet" aria-pressed="true">사운드 ON</button><button id="pause-button" class="quiet">일시정지</button><button id="brake-button" class="quiet" aria-pressed="false" disabled>브레이크 OFF</button></div>
+      <div class="training-controls"><span id="mode-label">FREE FLIGHT</span><button id="map-button" class="quiet" aria-expanded="false" aria-controls="map-panel">맵 · 산악 도시</button><button id="audio-button" class="quiet" aria-pressed="true">사운드 ON</button><button id="pause-button" class="quiet">일시정지</button><button id="brake-button" class="quiet" aria-pressed="false" disabled>브레이크 OFF</button></div>
     </nav>
     <section id="flight" class="flight" aria-label="1인칭 비행 시뮬레이터">
       <canvas id="flight-canvas" aria-label="하늘, 지면과 조종석이 표시되는 비행 화면"></canvas>
@@ -36,6 +36,15 @@
       <div id="flight-warning" class="flight-warning" role="alert" hidden>
         <strong>STALL</strong><span>기수를 낮추고 출력을 올리세요</span>
       </div>
+      <section id="map-panel" class="map-panel" aria-labelledby="map-title" hidden>
+        <header><div><span>FLIGHT AREA</span><h2 id="map-title">비행 맵 선택</h2></div><button id="map-close-button" class="quiet" aria-label="맵 선택 닫기">×</button></header>
+        <div class="map-grid">
+          <button data-map="mountain-city" aria-pressed="true"><i class="map-preview mountain-city"></i><strong>산악 도시</strong><small>산맥 · 도시 · 도로</small></button>
+          <button data-map="ocean-islands" aria-pressed="false"><i class="map-preview ocean-islands"></i><strong>바다와 섬</strong><small>해안 · 수면 · 군도</small></button>
+          <button data-map="desert-base" aria-pressed="false"><i class="map-preview desert-base"></i><strong>사막 기지</strong><small>협곡 · 격납고 · 기지</small></button>
+          <button data-map="night-city" aria-pressed="false"><i class="map-preview night-city"></i><strong>야간 도시</strong><small>별빛 · 빌딩 · 도로등</small></button>
+        </div>
+      </section>
       <section id="flight-result" class="flight-result" tabindex="-1" aria-labelledby="result-title" hidden>
         <span class="result-eyebrow">FLIGHT DEBRIEF</span><h2 id="result-title"></h2><p id="result-description"></p><div id="result-metrics"></div><button id="retry-button" class="primary">같은 훈련 다시 시작</button>
       </section>
@@ -100,6 +109,6 @@
   </main>
   <!-- 일반 스크립트로 시작해야 파일을 직접 열어도 실행 방법을 안내할 수 있습니다.
        MediaPipe는 main.js 내부에서 필요한 시점에 동적 import합니다. -->
-  <script defer src="main.js?v=20260911-35"></script>
+  <script defer src="main.js?v=20260911-36"></script>
 </body>
 </html>

@@ -59,6 +59,12 @@ const STALL_EXIT_SPEED = 68; // 속도가 충분히 회복된 뒤 경고를 꺼 
 const LANDING_VOICE_COOLDOWN = 1800; // 음성 경고가 서로 겹치지 않는 최소 간격(ms)
 const CITY_DRAW_DISTANCE = 5600; // 도시 건물을 그리는 전방 거리(m)
 const CITY_ROW_SPACING = 260; // 절차적으로 반복되는 도시 블록 간격(m)
+const MAP_THEMES = {
+  "mountain-city": {label:"산악 도시",sky:["#112c43","#456b80","#bdcdbf"],ground:["#718774","#425f55","#1c3734"],mountain:["#294b586e","#526f6f99"],grid:"166,190,147",road:"#263c3d99",crossRoad:"#2b414199",buildings:["#405653","#30494b","#253f46"],roof:"#65746a",side:"#172f36aa",window:"#d9e7ad",cloud:"222,233,226"},
+  "ocean-islands": {label:"바다와 섬",sky:["#174264","#5792aa","#c2d7ce"],ground:["#276c84","#164f68","#082e48"],mountain:null,grid:"120,207,211",cloud:"229,240,236"},
+  "desert-base": {label:"사막 기지",sky:["#244e67","#7798a0","#e6c692"],ground:["#ad895d","#8a613f","#513a2b"],mountain:["#7a4e3d88","#a36b4899"],grid:"226,190,126",road:"#59483caa",crossRoad:"#665044aa",buildings:["#806955","#6d5b4b","#584b40"],roof:"#aa9270",side:"#493e35bb",window:"#f1c66f",cloud:"239,221,188",desert:true},
+  "night-city": {label:"야간 도시",sky:["#020712","#102337","#294252"],ground:["#13252b","#0b1d22","#040d12"],mountain:["#0b172566","#172b3299"],grid:"81,142,133",road:"#142b32cc",crossRoad:"#18323acc",buildings:["#1a3440","#142a37","#0d222e"],roof:"#34515a",side:"#081722dd",window:"#d7ef8b",cloud:"111,139,151",night:true}
+};
 const KNOTS_TO_MPS = 0.514444;
 const FEET_TO_METERS = 0.3048;
 const RUNWAY_NEAR_CLIP = 3;
@@ -85,6 +91,7 @@ let landmarker = null, stream = null, cameraActive = false;
 let lastVideoTime = -1, lastInference = 0, lastFrame = 0, lastHud = 0;
 let inferenceFailures = 0, messageTimer = 0;
 let connectionStage = "idle";
+let worldMap = (()=>{try{const saved=localStorage.getItem("aeronaut-map");return MAP_THEMES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
 // 기준 위치는 현재 카메라 연결 동안만 유지합니다. 이미지나 랜드마크는 저장하지 않습니다.
 const calibration = { active: false, neutral: null, palmScale: null, palmShape: null, started: 0, held: 0, lastSample: 0, reference: null, referenceScale: null, sumScale: 0, sumShape: 0, sumX: 0, sumY: 0, count: 0, note: "이지 조종은 손을 보여주면 자동으로 시작합니다. C 키는 표시 중심을 맞출 때만 사용합니다." };
 
@@ -1043,14 +1050,16 @@ function drawWorld(now) {
   ctx.rotate(-radians(flight.roll));
   ctx.translate(0, flight.pitch * height * 0.012);
   const extent = Math.hypot(width, height) * 2;
+  const theme=MAP_THEMES[worldMap];
   const sky = ctx.createLinearGradient(0, -height, 0, 20);
-  sky.addColorStop(0, "#112c43"); sky.addColorStop(0.65, "#456b80"); sky.addColorStop(1, "#bdcdbf");
+  sky.addColorStop(0,theme.sky[0]);sky.addColorStop(.65,theme.sky[1]);sky.addColorStop(1,theme.sky[2]);
   ctx.fillStyle = sky; ctx.fillRect(-extent, -extent, extent * 2, extent);
   const ground = ctx.createLinearGradient(0, 0, 0, height);
-  ground.addColorStop(0, "#718774"); ground.addColorStop(0.18, "#425f55"); ground.addColorStop(1, "#1c3734");
+  ground.addColorStop(0,theme.ground[0]);ground.addColorStop(.18,theme.ground[1]);ground.addColorStop(1,theme.ground[2]);
   ctx.fillStyle = ground; ctx.fillRect(-extent, 0, extent * 2, extent);
 
-  drawMountainRanges(extent);
+  if(theme.night) drawNightSky(extent);
+  if(theme.mountain) drawMountainRanges(extent,theme);
 
   // 순환 구름: 시간과 속도로 천천히 흘러가며 모두 수평선 위에 위치합니다.
   for (let i = 0; i < 12; i++) {
@@ -1058,7 +1067,7 @@ function drawWorld(now) {
     const x = ((i * 293 + now * 0.002 + flight.heading * 5) % band) - band / 2;
     const y = -80 - (i % 4) * height * 0.15;
     const size = 22 + (i % 3) * 12;
-    ctx.fillStyle = `rgba(222,233,226,${0.08 + (i % 3) * 0.035})`;
+    ctx.fillStyle = `rgba(${theme.cloud},${(theme.night ? .035 : .08) + (i % 3) * (theme.night ? .016 : .035)})`;
     ctx.beginPath(); ctx.ellipse(x, y, size * 2.8, size * 0.45, 0, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.ellipse(x - size * 0.45, y - size * 0.2, size * 1.3, size * 0.55, 0, 0, Math.PI * 2); ctx.fill();
   }
@@ -1066,7 +1075,7 @@ function drawWorld(now) {
   // 지면의 원근 격자와 패치가 전진감을 줍니다. 고도에 따라 격자 크기도 완만히 변합니다.
   const scale = clamp(2400 / (flight.altitude + 400), 0.35, 2);
   const drift = Math.sin(radians(flight.heading - 300)) * width * 0.7;
-  ctx.lineWidth = 1; ctx.strokeStyle = "#9ec0a522";
+  ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${theme.grid},.13)`;
   for (let i = -16; i <= 16; i++) {
     ctx.beginPath(); ctx.moveTo(i * 20 + drift * 0.07, 0); ctx.lineTo(i * width * 0.21 + drift, extent); ctx.stroke();
   }
@@ -1074,10 +1083,10 @@ function drawWorld(now) {
     // 속도에 비례해 격자가 조종석 쪽으로 흘러 지상에서도 가속감을 읽을 수 있습니다.
     const depth = ((i / 19 + flight.distance * 2.4) % 1);
     const y = depth * depth * height * 1.65 * scale;
-    ctx.strokeStyle = `rgba(166,190,147,${depth * 0.17})`;
+    ctx.strokeStyle = `rgba(${theme.grid},${depth*.17})`;
     ctx.beginPath(); ctx.moveTo(-extent, y); ctx.lineTo(extent, y); ctx.stroke();
   }
-  drawCityScenery();
+  if(worldMap==="ocean-islands") drawOceanScenery(); else drawCityScenery(theme);
   if (lesson.mode !== "free") drawRunway();
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointRings();
   // 먼 수평선: 기울기와 피치 방향을 쉽게 읽을 수 있는 얇은 빛.
@@ -1090,7 +1099,7 @@ function drawWorld(now) {
 }
 
 // 두 겹의 산맥은 서로 다른 속도로 흘러 가까운 능선과 먼 능선의 깊이를 만듭니다.
-function drawMountainRanges(extent) {
+function drawMountainRanges(extent,theme) {
   for(const layer of [0,1]) {
     const step=layer?52:70;
     const offset=flight.heading*(layer?5.2:2.8)+lesson.x*(layer?.035:.018);
@@ -1102,7 +1111,7 @@ function drawMountainRanges(extent) {
       mountain.push([x,-8-peak-(layer?0:13)]);
     }
     mountain.push([extent,10]);
-    path(mountain,layer?"#526f6f99":"#294b586e");
+    path(mountain,theme.mountain[layer]);
   }
 }
 
@@ -1111,15 +1120,27 @@ const sceneryNoise=value=>{
   return wave-Math.floor(wave);
 };
 
-function drawCityScenery() {
+function drawNightSky(extent) {
+  ctx.save();
+  for(let i=0;i<65;i++) {
+    const band=extent*2,x=((sceneryNoise(i*4.31)*band+flight.heading*8)%band)-extent;
+    const y=-18-sceneryNoise(i*7.19)*height*.92;
+    const size=sceneryNoise(i*2.07)>.88?1.6:.7;
+    ctx.fillStyle=`rgba(220,239,225,${.25+sceneryNoise(i*9.7)*.6})`;ctx.fillRect(x,y,size,size);
+  }
+  ctx.restore();
+}
+
+function drawCityScenery(theme) {
   const roadBase=Math.floor(lesson.z/2000)*2000;
   // 활주로 양옆의 간선도로와 반복되는 연결도로. 중앙 160m는 비워 이착륙 시야를 보존합니다.
-  runwayRectangle(-128,roadBase-5000,-117,roadBase+7000,"#263c3d99");
-  runwayRectangle(117,roadBase-5000,128,roadBase+7000,"#263c3d99");
+  runwayRectangle(-128,roadBase-5000,-117,roadBase+7000,theme.road);
+  runwayRectangle(117,roadBase-5000,128,roadBase+7000,theme.road);
   for(let z=roadBase-4600;z<roadBase+6800;z+=520) {
-    runwayRectangle(-720,z,-80,z+7,"#2b414199");
-    runwayRectangle(80,z,720,z+7,"#2b414199");
+    runwayRectangle(-720,z,-80,z+7,theme.crossRoad);
+    runwayRectangle(80,z,720,z+7,theme.crossRoad);
   }
+  if(theme.night) drawRoadLights(roadBase);
 
   const centerRow=Math.floor(lesson.z/CITY_ROW_SPACING),buildings=[];
   for(let row=-9;row<=23;row++) {
@@ -1130,15 +1151,27 @@ function drawCityScenery() {
       const x=side*(175+sceneryNoise(seed+2.3)*470);
       const camera=runwayCameraPoint(x,z);
       if(camera.z<70||camera.z>CITY_DRAW_DISTANCE) continue;
-      buildings.push({camera,z,x,width:32+sceneryNoise(seed+4.1)*62,height:18+sceneryNoise(seed+7.7)*92,seed});
+      const buildingHeight=theme.desert?8+sceneryNoise(seed+7.7)*20:18+sceneryNoise(seed+7.7)*92;
+      buildings.push({camera,z,x,width:(theme.desert?55:32)+sceneryNoise(seed+4.1)*(theme.desert?85:62),height:buildingHeight,seed});
     }
   }
   // 먼 건물부터 그려 가까운 건물이 자연스럽게 앞을 가리게 합니다.
   buildings.sort((a,b)=>b.camera.z-a.camera.z);
-  buildings.forEach(drawCityBuilding);
+  buildings.forEach(building=>drawCityBuilding(building,theme));
 }
 
-function drawCityBuilding(building) {
+function drawRoadLights(roadBase) {
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  ctx.save();ctx.fillStyle="#f4d776";ctx.shadowColor="#f4d776";ctx.shadowBlur=6;
+  for(let z=roadBase-3800;z<roadBase+6200;z+=95) for(const x of [-123,123]) {
+    const camera=runwayCameraPoint(x,z);if(camera.z<50||camera.z>3600) continue;
+    const px=camera.x*focal/camera.z,py=eyeHeight*focal/camera.z;
+    const radius=clamp(420/camera.z,.6,2.2);ctx.beginPath();ctx.arc(px,py,radius,0,Math.PI*2);ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawCityBuilding(building,theme) {
   const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2,z=building.camera.z;
   const centerX=building.camera.x*focal/z,halfWidth=building.width*focal/z*.5;
   const bottom=eyeHeight*focal/z,top=(eyeHeight-building.height)*focal/z;
@@ -1146,15 +1179,15 @@ function drawCityBuilding(building) {
   const haze=clamp(1-z/CITY_DRAW_DISTANCE,.16,.88);
   const shade=sceneryNoise(building.seed+11);
   ctx.save();ctx.globalAlpha=haze;
-  ctx.fillStyle=shade>.66?"#405653":shade>.33?"#30494b":"#253f46";
+  ctx.fillStyle=shade>.66?theme.buildings[0]:shade>.33?theme.buildings[1]:theme.buildings[2];
   ctx.fillRect(centerX-halfWidth,top,halfWidth*2,Math.max(1,bottom-top));
   // 햇빛을 받는 얇은 측면과 옥상으로 단순한 입체감을 냅니다.
   const roof=Math.min(7,900/z),slant=Math.min(9,1100/z);
-  path([[centerX-halfWidth,top],[centerX+halfWidth,top],[centerX+halfWidth-slant,top-roof],[centerX-halfWidth+slant,top-roof]],"#65746a");
-  ctx.fillStyle="#172f36aa";ctx.fillRect(centerX+halfWidth*.55,top,halfWidth*.45,Math.max(1,bottom-top));
+  path([[centerX-halfWidth,top],[centerX+halfWidth,top],[centerX+halfWidth-slant,top-roof],[centerX-halfWidth+slant,top-roof]],theme.roof);
+  ctx.fillStyle=theme.side;ctx.fillRect(centerX+halfWidth*.55,top,halfWidth*.45,Math.max(1,bottom-top));
 
   if(z<1900&&bottom-top>9&&halfWidth>3) {
-    ctx.fillStyle="#d9e7ad";ctx.globalAlpha=haze*.62;
+    ctx.fillStyle=theme.window;ctx.globalAlpha=haze*(theme.night ? .95 : .62);
     const columns=halfWidth>9?3:2,rows=clamp(Math.floor((bottom-top)/9),1,5);
     for(let row=0;row<rows;row++) for(let column=0;column<columns;column++) {
       if(sceneryNoise(building.seed+row*7+column*3)<.44) continue;
@@ -1164,6 +1197,38 @@ function drawCityBuilding(building) {
     }
   }
   ctx.restore();
+}
+
+function drawGroundEllipse(centerX,centerZ,radiusX,radiusZ,color) {
+  const cameraPoints=[];
+  for(let i=0;i<22;i++) {
+    const angle=Math.PI*2*i/22;
+    cameraPoints.push(runwayCameraPoint(centerX+Math.cos(angle)*radiusX,centerZ+Math.sin(angle)*radiusZ));
+  }
+  const clipped=clipRunwayPolygon(cameraPoints);if(clipped.length<3)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  path(clipped.map(point=>[point.x*focal/point.z,eyeHeight*focal/point.z]),color);
+}
+
+function drawOceanScenery() {
+  const rowBase=Math.floor(lesson.z/700);
+  // 훈련 활주로는 작은 공항 섬 위에 놓입니다.
+  if(lesson.mode!=="free") runwayRectangle(-105,-180,105,RUNWAY.length+180,"#61765f");
+  for(let row=-6;row<=12;row++) {
+    const index=rowBase+row,seed=index*3.41;
+    for(const side of [-1,1]) {
+      const z=index*700+(sceneryNoise(seed+side*2.1)-.5)*230;
+      const x=side*(150+sceneryNoise(seed+side*8.4)*780);
+      drawGroundEllipse(x,z,65+sceneryNoise(seed+4.2)*150,45+sceneryNoise(seed+9.6)*95,"#587c5f");
+      drawGroundEllipse(x,z,38+sceneryNoise(seed+4.2)*110,26+sceneryNoise(seed+9.6)*66,"#78916b");
+    }
+  }
+  const waveBase=Math.floor(lesson.z/420)*420;
+  for(let z=waveBase-2500;z<waveBase+5200;z+=420) {
+    const offset=(sceneryNoise(z*.01)-.5)*360;
+    runwayRectangle(-900+offset,z,-260+offset,z+3,"#a9dae033");
+    runwayRectangle(180-offset,z,760-offset,z+3,"#a9dae02b");
+  }
 }
 
 // 화면 중심에서 바깥으로 퍼지는 짧은 선으로 고속 공기 흐름을 표현합니다.
@@ -1702,6 +1767,26 @@ function animate(now) {
   requestAnimationFrame(animate);
 }
 
+function setMapPanel(open) {
+  $("map-panel").hidden=!open;
+  $("map-button").setAttribute("aria-expanded",String(open));
+  if(open) $("map-panel").querySelector(`[data-map="${worldMap}"]`)?.focus();
+  else $("map-button").focus({preventScroll:true});
+}
+
+function selectWorldMap(map,notify=true) {
+  if(!MAP_THEMES[map]) return;
+  worldMap=map;
+  try{localStorage.setItem("aeronaut-map",map);}catch{}
+  $("flight").dataset.map=map;
+  $("map-button").textContent=`맵 · ${MAP_THEMES[map].label}`;
+  document.querySelectorAll("[data-map]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.map===map)));
+  if(notify) {
+    setMapPanel(false);
+    showMessage(`${MAP_THEMES[map].label} 맵으로 변경했습니다.`,false,3500);
+  }
+}
+
 $("camera-button").addEventListener("click", () => {
   if(cameraActive){stopCamera();showMessage("웹캠 연결을 종료했습니다. 현재 스로틀은 유지됩니다.",false,4000);}
   else startCamera();
@@ -1719,8 +1804,12 @@ function toggleBrake() { if (lesson.mode !== "free" && !lesson.result && lesson.
 $("pause-button").addEventListener("click", togglePause);
 $("brake-button").addEventListener("click", toggleBrake);
 $("audio-button").addEventListener("click",() => setSoundMuted(!sound.muted));
+$("map-button").addEventListener("click",()=>setMapPanel($("map-panel").hidden));
+$("map-close-button").addEventListener("click",()=>setMapPanel(false));
+document.querySelectorAll("[data-map]").forEach(button=>button.addEventListener("click",()=>selectWorldMap(button.dataset.map)));
 document.addEventListener("pointerdown",ensureAudio,{once:true});
 document.addEventListener("keydown", event => {
+  if(event.code==="Escape"&&!$("map-panel").hidden){event.preventDefault();setMapPanel(false);return;}
   if (event.repeat || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable) return;
   if (event.code === "KeyP") { event.preventDefault(); togglePause(); }
   if (event.code === "KeyB") { event.preventDefault(); toggleBrake(); }
@@ -1762,7 +1851,7 @@ document.addEventListener("visibilitychange",() => {
 });
 window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
 new ResizeObserver(resizeCanvas).observe(canvas);
-resizeCanvas();updateHud();requestAnimationFrame(animate);
+selectWorldMap(worldMap,false);resizeCanvas();updateHud();requestAnimationFrame(animate);
 if (window.location.protocol === "file:") {
   $("local-server-link").hidden = false;
   showMessage("파일을 직접 열었습니다. 아래 버튼으로 로컬 서버에서 열거나 VS Code Live Server를 사용해주세요.", true);
