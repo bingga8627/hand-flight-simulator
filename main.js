@@ -56,6 +56,7 @@ const CHECKPOINT_ALTITUDE_TOLERANCE = 180; // 손 조종 오차를 고려한 통
 const WIND_STREAK_START_SPEED = 70; // 이 속도부터 공기 흐름이 화면에 보이기 시작합니다.
 const STALL_ENTER_SPEED = 58; // 공중에서 이 속도 아래면 실속 경고를 켭니다.
 const STALL_EXIT_SPEED = 68; // 속도가 충분히 회복된 뒤 경고를 꺼 깜빡임을 막습니다.
+const LANDING_VOICE_COOLDOWN = 1800; // 음성 경고가 서로 겹치지 않는 최소 간격(ms)
 const KNOTS_TO_MPS = 0.514444;
 const FEET_TO_METERS = 0.3048;
 const RUNWAY_NEAR_CLIP = 3;
@@ -74,6 +75,7 @@ const mission = { checkpoint:0, elapsed:0, returning:false, gateEffect:null, gat
 const stick = { x: 0, y: 0, grabbed: false, anchor: null, depthAnchor: null, depthShape: null };
 const sound = { context:null, master:null, engineGain:null, engineOscillator:null, engineHarmonic:null, engineFilter:null, engineNoise:null, engineNoiseGain:null, engineNoiseFilter:null, engineTurbine:null, engineTurbineGain:null, engineAir:null, engineAirGain:null, engineAirFilter:null, engineCompressor:null, muted:false };
 const effects = { stall:false, lastStallTone:0 };
+const landingAlerts = { sink:false, align:false, lastSpoken:0 };
 function newHand() { return { detected: false, point: null, pinch: false, lastSeen: 0, palmScale: null, palmShape: null, depthValid: false }; }
 const hands = { Right: newHand(), Left: newHand() };
 let width = 1, height = 1, dpr = 1;
@@ -180,6 +182,19 @@ function playTone(frequency,duration=.15,volume=.12,delay=0,type="sine") {
   oscillator.connect(gain);gain.connect(sound.master);oscillator.start(start);oscillator.stop(start+duration+.03);
 }
 
+// 운영체제의 음성 합성을 사용해 외부 음원 없이 항공기식 콜아웃을 냅니다.
+function speakCallout(text) {
+  if(sound.muted||!("speechSynthesis" in window)||typeof SpeechSynthesisUtterance==="undefined") return;
+  try {
+    const utterance=new SpeechSynthesisUtterance(text);
+    utterance.lang="en-US";utterance.rate=.92;utterance.pitch=.72;utterance.volume=.9;
+    const voices=window.speechSynthesis.getVoices();
+    utterance.voice=voices.find(voice=>/david|guy|male/i.test(voice.name)&&voice.lang.startsWith("en"))
+      ||voices.find(voice=>voice.lang.startsWith("en"))||null;
+    window.speechSynthesis.speak(utterance);
+  } catch(error) { console.warn("음성 콜아웃 재생 실패",error); }
+}
+
 function playGateSound(success,final=false) {
   if(success) {
     [0,1,2].forEach((step,index)=>playTone((final?520:440)*Math.pow(1.25,step),.18,.13,index*.11,"triangle"));
@@ -193,6 +208,7 @@ function setSoundMuted(muted) {
   const context=ensureAudio();
   if(context&&sound.master) sound.master.gain.setTargetAtTime(muted?0:.28,context.currentTime,.03);
   const button=$("audio-button");button.textContent=muted?"사운드 OFF":"사운드 ON";button.setAttribute("aria-pressed",String(!muted));
+  if(muted&&"speechSynthesis" in window) window.speechSynthesis.cancel();
 }
 
 function startLesson(mode) {
@@ -205,6 +221,8 @@ function startLesson(mode) {
       : { speed: 120, altitude: 2400, throttle: 55, pitch: 0 };
   Object.assign(flight, preset, { roll: 0, heading: RUNWAY.heading, verticalSpeed: 0, distance: 0 });
   effects.stall=false;effects.lastStallTone=0;$("flight-warning").hidden=true;
+  Object.assign(landingAlerts,{sink:false,align:false,lastSpoken:0});
+  if("speechSynthesis" in window) window.speechSynthesis.cancel();
   $("flight-result").hidden = true;
   $("flight").classList.toggle("training", mode !== "free");
   showMessage(mode === "takeoff" ? "지상 출발 준비. 손 중심과 출력을 맞춘 뒤 ‘비행 시작’을 누르세요."
@@ -272,19 +290,60 @@ function getLandingGuidance() {
   return { forward,targetZ,distance,desiredHeading,desiredAltitude,headingError,altitudeError,flare,stage,targetSpeed };
 }
 
+function landingModeActive() {
+  return lesson.mode === "landing" || (lesson.mode === "mission" && mission.returning);
+}
+
+function papiGuidance() {
+  if(!landingModeActive()||lesson.phase!=="airborne") return null;
+  const guidance=getLandingGuidance(),error=guidance.altitudeError;
+  const whiteCount=error>100?4:error>35?3:error>=-35?2:error>=-100?1:0;
+  return {...guidance,whiteCount,label:whiteCount===2?"ON GLIDE":whiteCount>2?"HIGH":"LOW"};
+}
+
+// 현재 자세를 그대로 유지한다고 가정한 단순 예상 접지점입니다.
+function predictTouchdown() {
+  if(!landingModeActive()||lesson.phase!=="airborne"||flight.verticalSpeed>=-.5||flight.altitude<=0) return null;
+  const seconds=clamp(flight.altitude/-flight.verticalSpeed,0,60);
+  const travel=flight.speed*KNOTS_TO_MPS*seconds;
+  const direction=radians(flight.heading-RUNWAY.heading);
+  const x=lesson.x+Math.sin(direction)*travel;
+  const z=lesson.z+Math.cos(direction)*travel;
+  const guidance=getLandingGuidance();
+  const alongError=(z-guidance.targetZ)*(guidance.forward?1:-1);
+  const laterallyAligned=Math.abs(x)<=RUNWAY.width/2-3;
+  const status=!laterallyAligned?"OFF RUNWAY":alongError < -250?"SHORT":alongError > 450?"LONG":"TOUCHDOWN";
+  return {x,z,seconds,status,safe:status==="TOUCHDOWN"};
+}
+
 function updateLandingCallouts() {
-  if ((lesson.mode !== "landing" && !(lesson.mode === "mission" && mission.returning)) || lesson.phase !== "airborne") return;
-  const thresholds = [100,50,25,10];
-  for (const altitude of thresholds) {
-    if (flight.altitude <= altitude && !lesson.callouts[altitude]) {
-      lesson.callouts[altitude]=true;
-      const text = altitude === 50
-        ? (easyControlEnabled() ? "50 FT · FLARE · 오른손을 조금 올려 기수를 완만하게 드세요." : "50 FT · FLARE · 조종간을 조금 당겨 기수를 완만하게 드세요.")
-        : `${altitude} FT`;
-      playTone(altitude===50?720:560,.12,altitude===50?.14:.09,0,"triangle");
-      showMessage(text,false,altitude===50?5000:1800);
-      break;
-    }
+  if (!landingModeActive() || lesson.phase !== "airborne") return;
+  const now=performance.now(),thresholds=[100,50,30,20,10];
+  const crossed=thresholds.filter(altitude=>flight.altitude<=altitude&&!lesson.callouts[altitude]);
+  if(crossed.length) {
+    crossed.forEach(altitude=>lesson.callouts[altitude]=true);
+    const altitude=Math.min(...crossed);
+    const spoken={100:"one hundred",50:"fifty",30:"thirty",20:"twenty",10:"ten"}[altitude];
+    const text = altitude === 50
+      ? (easyControlEnabled() ? "50 FT · FLARE · 오른손을 조금 올려 기수를 완만하게 드세요." : "50 FT · FLARE · 조종간을 조금 당겨 기수를 완만하게 드세요.")
+      : `${altitude} FT`;
+    playTone(altitude===50?720:560,.12,altitude===50?.14:.09,0,"triangle");
+    speakCallout(spoken);landingAlerts.lastSpoken=now;
+    showMessage(text,false,altitude===50?5000:1800);
+    return;
+  }
+
+  const guidance=getLandingGuidance();
+  const sinkDanger=flight.altitude<300&&-flight.verticalSpeed*60>RUNWAY.maxSink*60;
+  const alignDanger=flight.altitude<350&&(Math.abs(guidance.headingError)>10||Math.abs(lesson.x)>35);
+  landingAlerts.sink=sinkDanger;landingAlerts.align=alignDanger;
+  if(now-landingAlerts.lastSpoken<LANDING_VOICE_COOLDOWN) return;
+  if(sinkDanger) {
+    landingAlerts.lastSpoken=now;
+    playTone(240,.16,.12,0,"square");playTone(180,.18,.11,.18,"square");speakCallout("sink rate");
+  } else if(alignDanger) {
+    landingAlerts.lastSpoken=now;
+    playTone(330,.12,.10,0,"square");playTone(330,.12,.10,.2,"square");speakCallout("align runway");
   }
 }
 
@@ -1117,6 +1176,47 @@ function drawRunway() {
       ctx.fillStyle="#d3f9bc";ctx.textAlign="center";ctx.font="10px Consolas,monospace";ctx.fillText("TOUCHDOWN",x,y-19);
     }
   }
+  drawLandingAids();
+}
+
+function drawLandingAids() {
+  const papi=papiGuidance();
+  if(!papi||lesson.paused||lesson.result) return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2,half=RUNWAY.width/2;
+  const side=papi.forward?-1:1;
+  const lightZ=papi.targetZ;
+  let labelX=0,labelY=0,visibleLights=0;
+
+  // PAPI 네 개를 실제 활주로 옆 지상 좌표에 투영합니다.
+  ctx.save();
+  for(let i=0;i<4;i++) {
+    const camera=runwayCameraPoint(side*(half+11+i*5),lightZ);
+    if(camera.z<=RUNWAY_NEAR_CLIP) continue;
+    const x=camera.x*focal/camera.z,y=eyeHeight*focal/camera.z;
+    const white=i<papi.whiteCount,color=white?"#fffbe6":"#ff4f3e";
+    const radius=clamp(2+420/camera.z,2.4,7);
+    ctx.fillStyle=color;ctx.shadowColor=color;ctx.shadowBlur=8+radius;
+    ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();
+    labelX+=x;labelY+=y;visibleLights++;
+  }
+  if(visibleLights&&papi.distance<1200) {
+    ctx.shadowBlur=0;ctx.fillStyle=papi.whiteCount===2?"#bcf7b0":"#ffd18a";
+    ctx.font="bold 9px Consolas,monospace";ctx.textAlign="center";
+    ctx.fillText(`PAPI ${papi.whiteCount}W ${4-papi.whiteCount}R · ${papi.label}`,labelX/visibleLights,labelY/visibleLights-14);
+  }
+  ctx.restore();
+
+  const prediction=predictTouchdown();
+  if(!prediction) return;
+  const camera=runwayCameraPoint(prediction.x,prediction.z);
+  if(camera.z<=RUNWAY_NEAR_CLIP) return;
+  const x=camera.x*focal/camera.z,y=eyeHeight*focal/camera.z;
+  const color=prediction.safe?"#bcf7b0":"#ffd18a";
+  ctx.save();ctx.translate(x,y);ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;
+  ctx.setLineDash([4,3]);ctx.beginPath();ctx.ellipse(0,0,17,8,0,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+  ctx.beginPath();ctx.moveTo(-23,0);ctx.lineTo(-8,0);ctx.moveTo(8,0);ctx.lineTo(23,0);ctx.moveTo(0,-13);ctx.lineTo(0,-5);ctx.moveTo(0,5);ctx.lineTo(0,13);ctx.stroke();
+  if(camera.z<1200) {ctx.font="bold 9px Consolas,monospace";ctx.textAlign="center";ctx.fillText(`EST. ${prediction.status}`,0,-18);}
+  ctx.restore();
 }
 
 function drawCheckpointRings() {
@@ -1487,6 +1587,10 @@ function updateLessonHud() {
   $("lateral-error").textContent = Math.abs(lesson.x)<2 ? "중앙" : `${lesson.x>0?"우":"좌"} ${Math.abs(lesson.x).toFixed(0)} M`;
   $("glide-error").textContent = lesson.phase !== "airborne" ? "—" : `${glideError >= 0 ? "높음" : "낮음"} ${Math.abs(glideError).toFixed(0)} FT`;
   $("target-speed").textContent = landing ? `${landing.targetSpeed} KTS` : lesson.phase === "ground" ? "70+ KTS" : "상승 유지";
+  if(landing&&lesson.phase==="airborne") {
+    const papi=papiGuidance(),prediction=predictTouchdown();
+    $("director-status").textContent=`PAPI ${papi.whiteCount}W/${4-papi.whiteCount}R${prediction?` · ${prediction.status}`:""}`;
+  }
   const phases = {ground:"지상 활주",airborne:lesson.takeoffNotified?"이륙 완료 · 비행 중":lesson.tookOff?"이륙 상승":"접근 / 비행",rollout:"접지 완료 · 제동",complete:"착륙 성공",failed:"훈련 종료"};
   $("phase-label").textContent = lesson.paused ? "준비 · 비행 일시정지" : landing && lesson.phase === "airborne" ? landing.stage : phases[lesson.phase];
   let hint;
@@ -1583,7 +1687,7 @@ document.addEventListener("visibilitychange",() => {
   clearHands(); lastFrame=0;
   if (document.hidden && lesson.mode !== "free" && !lesson.result) lesson.paused = true;
 });
-window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();});
+window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
 new ResizeObserver(resizeCanvas).observe(canvas);
 resizeCanvas();updateHud();requestAnimationFrame(animate);
 if (window.location.protocol === "file:") {
