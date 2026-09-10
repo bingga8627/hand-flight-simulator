@@ -1061,17 +1061,9 @@ function drawWorld(now) {
   drawSkyDetails(extent,theme,now);
   if(theme.night) drawNightSky(extent);
   if(theme.mountain) drawMountainRanges(extent,theme);
+  if(worldMap==="mountain-city"||worldMap==="night-city") drawDistantSkyline(extent,theme);
 
-  // 순환 구름: 시간과 속도로 천천히 흘러가며 모두 수평선 위에 위치합니다.
-  for (let i = 0; i < 12; i++) {
-    const band = width * 2.8;
-    const x = ((i * 293 + now * 0.002 + flight.heading * 5) % band) - band / 2;
-    const y = -80 - (i % 4) * height * 0.15;
-    const size = 22 + (i % 3) * 12;
-    ctx.fillStyle = `rgba(${theme.cloud},${(theme.night ? .035 : .08) + (i % 3) * (theme.night ? .016 : .035)})`;
-    ctx.beginPath(); ctx.ellipse(x, y, size * 2.8, size * 0.45, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(x - size * 0.45, y - size * 0.2, size * 1.3, size * 0.55, 0, 0, Math.PI * 2); ctx.fill();
-  }
+  drawCloudField(theme,now);
 
   // 지면의 원근 격자와 패치가 전진감을 줍니다. 고도에 따라 격자 크기도 완만히 변합니다.
   const scale = clamp(2400 / (flight.altitude + 400), 0.35, 2);
@@ -1095,9 +1087,54 @@ function drawWorld(now) {
   ctx.strokeStyle = "#d7e8cb77"; ctx.beginPath(); ctx.moveTo(-extent,0); ctx.lineTo(extent,0); ctx.stroke();
   drawPitchLadder();
   ctx.restore();
+  drawMapColorGrade(theme);
   drawWindStreaks(now);
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointNavigator();
   if (lesson.mode === "mission") drawGatePassEffect(now);
+}
+
+// 여러 개의 반투명 타원과 음영을 겹쳐 납작한 구름 대신 부피 있는 구름층을 만듭니다.
+function drawCloudField(theme,now) {
+  const band=width*3.2;
+  ctx.save();
+  for(let i=0;i<11;i++) {
+    const phase=((i*347+now*(.0014+(i%3)*.00035)+flight.heading*5.6)%band)-band/2;
+    const y=-62-(i%4)*height*.145-sceneryNoise(i*4.8)*28;
+    const size=20+(i%4)*9;
+    const alpha=(theme.night?.035:.075)+(i%3)*(theme.night?.013:.026);
+    const shadow=ctx.createRadialGradient(phase,y+size*.22,size*.1,phase,y,size*2.8);
+    shadow.addColorStop(0,`rgba(${theme.cloud},${alpha*1.35})`);
+    shadow.addColorStop(.55,`rgba(${theme.cloud},${alpha})`);
+    shadow.addColorStop(1,`rgba(${theme.cloud},0)`);
+    ctx.fillStyle=shadow;ctx.beginPath();ctx.ellipse(phase,y,size*3.6,size*.78,0,0,Math.PI*2);ctx.fill();
+    for(let puff=0;puff<5;puff++) {
+      const px=phase+(puff-2)*size*.72,py=y-size*(.08+sceneryNoise(i*7+puff)*.3);
+      const pr=size*(.72+sceneryNoise(i*13+puff)*.48);
+      const glow=ctx.createRadialGradient(px-pr*.2,py-pr*.3,0,px,py,pr);
+      glow.addColorStop(0,`rgba(${theme.cloud},${alpha*1.8})`);glow.addColorStop(1,`rgba(${theme.cloud},0)`);
+      ctx.fillStyle=glow;ctx.beginPath();ctx.ellipse(px,py,pr*1.35,pr*.72,0,0,Math.PI*2);ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// 화면 가장자리의 은은한 감광과 수평선 산란광으로 깊이와 명암을 정리합니다.
+function drawMapColorGrade(theme) {
+  ctx.save();
+  const horizon=height*.46+flight.pitch*height*.012;
+  const bloom=ctx.createLinearGradient(0,horizon-height*.18,0,horizon+height*.24);
+  bloom.addColorStop(0,"#e9f0dc00");
+  bloom.addColorStop(.46,theme.night?"#79a2ad10":theme.desert?"#ffd69a20":"#e7eed51a");
+  bloom.addColorStop(1,"#07131b00");ctx.fillStyle=bloom;ctx.fillRect(0,0,width,height);
+  const vignette=ctx.createRadialGradient(width*.5,height*.43,height*.18,width*.5,height*.43,Math.max(width,height)*.72);
+  vignette.addColorStop(.45,"#00000000");vignette.addColorStop(1,theme.night?"#00081273":"#07151b45");
+  ctx.fillStyle=vignette;ctx.fillRect(0,0,width,height);
+  ctx.restore();
+}
+
+function sceneryNoise(value) {
+  const wave=Math.sin(value*12.9898+78.233)*43758.5453;
+  return wave-Math.floor(wave);
 }
 
 // 태양·달·수평선 안개를 더해 각 맵의 시간대와 대기감을 분명하게 만듭니다.
@@ -1167,11 +1204,6 @@ function drawMountainRanges(extent,theme) {
   }
 }
 
-const sceneryNoise=value=>{
-  const wave=Math.sin(value*12.9898+78.233)*43758.5453;
-  return wave-Math.floor(wave);
-};
-
 function drawNightSky(extent) {
   ctx.save();
   for(let i=0;i<65;i++) {
@@ -1190,6 +1222,27 @@ function drawNightSky(extent) {
   ctx.restore();
 }
 
+function drawDistantSkyline(extent,theme) {
+  // 높은 고도에서도 도시임을 알아볼 수 있도록 먼 수평선에 낮은 스카이라인을 둡니다.
+  const step=24,offset=((flight.heading*7+lesson.x*.035)%step+step)%step;
+  ctx.save();
+  for(let x=-extent-offset,index=Math.floor((-extent-offset)/step);x<extent;x+=step,index++) {
+    const seed=index*3.73,heightA=5+sceneryNoise(seed)*24;
+    const buildingWidth=12+sceneryNoise(seed+2.4)*11,top=-heightA;
+    ctx.fillStyle=theme.night?"#091820d9":"#314b4a80";ctx.fillRect(x,top,buildingWidth,heightA+2);
+    if(sceneryNoise(seed+4.8)>.84) {
+      ctx.fillStyle=theme.night?"#102a35e8":"#405b5780";ctx.fillRect(x+3,top-9,buildingWidth-6,10);
+    }
+    if(theme.night&&sceneryNoise(seed+8)>.38) {
+      ctx.fillStyle=sceneryNoise(seed+9)>.5?"#e8dc75aa":"#8cc7b899";
+      for(let wy=top+4;wy<-2;wy+=6) for(let wx=x+3;wx<x+buildingWidth-2;wx+=5) {
+        if(sceneryNoise(seed+wx+wy)>.54)ctx.fillRect(wx,wy,1.2,1.2);
+      }
+    }
+  }
+  ctx.restore();
+}
+
 function drawCityScenery(theme) {
   const roadBase=Math.floor(lesson.z/2000)*2000;
   // 활주로 양옆의 간선도로와 반복되는 연결도로. 중앙 160m는 비워 이착륙 시야를 보존합니다.
@@ -1201,6 +1254,7 @@ function drawCityScenery(theme) {
     runwayRectangle(-720,z+3,-80,z+3.8,theme.night?"#b8dc9d28":"#d8d9bf22");
     runwayRectangle(80,z+3,720,z+3.8,theme.night?"#b8dc9d28":"#d8d9bf22");
   }
+  drawCityTraffic(roadBase,theme);
   if(theme.night) drawRoadLights(roadBase);
 
   const centerRow=Math.floor(lesson.z/CITY_ROW_SPACING),buildings=[];
@@ -1219,6 +1273,37 @@ function drawCityScenery(theme) {
   // 먼 건물부터 그려 가까운 건물이 자연스럽게 앞을 가리게 합니다.
   buildings.sort((a,b)=>b.camera.z-a.camera.z);
   buildings.forEach(building=>drawCityBuilding(building,theme));
+  drawCityLandmarks(theme,roadBase);
+}
+
+function drawCityTraffic(roadBase,theme) {
+  // 도로를 따라 움직이는 작은 광점으로 도시가 정지된 모형처럼 보이지 않게 합니다.
+  const colorA=theme.night?"#f7e27c":"#dce2bd99",colorB=theme.night?"#ef5f55":"#b8c8b488";
+  const flow=(flight.distance*1500)%520;
+  for(let row=-7;row<10;row++) {
+    const z=roadBase+row*520+flow;
+    for(const side of [-1,1]) {
+      drawProjectedMarker(side*122,z,colorA,theme.night?2.3:1.25);
+      drawProjectedMarker(side*126,z+115,colorB,theme.night?2.0:1.1);
+    }
+  }
+}
+
+function drawCityLandmarks(theme,roadBase) {
+  if(theme.desert) return;
+  // 서로 다른 높이의 통신탑 두 개가 도시 실루엣의 기준점 역할을 합니다.
+  const towers=[{x:-410,z:roadBase+1480,h:145},{x:355,z:roadBase+2850,h:105}];
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  ctx.save();
+  for(const tower of towers) {
+    const camera=runwayCameraPoint(tower.x,tower.z);if(camera.z<70||camera.z>5000)continue;
+    const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z,top=(eyeHeight-tower.h)*focal/camera.z;
+    ctx.strokeStyle=theme.night?"#8eaaa3aa":"#526862aa";ctx.lineWidth=clamp(900/camera.z,.7,2.2);
+    ctx.beginPath();ctx.moveTo(x-8*focal/camera.z,bottom);ctx.lineTo(x,top);ctx.lineTo(x+8*focal/camera.z,bottom);ctx.stroke();
+    for(let level=1;level<4;level++){const y=lerp(top,bottom,level/4),w=(y-top)/(bottom-top)*8*focal/camera.z;ctx.beginPath();ctx.moveTo(x-w,y);ctx.lineTo(x+w,y);ctx.stroke();}
+    ctx.fillStyle=theme.night?"#ff554c":"#d6e2cf";ctx.shadowColor=ctx.fillStyle;ctx.shadowBlur=theme.night?8:2;ctx.beginPath();ctx.arc(x,top,clamp(430/camera.z,.8,2.4),0,Math.PI*2);ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawRoadLights(roadBase) {
@@ -1246,6 +1331,14 @@ function drawCityBuilding(building,theme) {
   const roof=Math.min(7,900/z),slant=Math.min(9,1100/z);
   path([[centerX-halfWidth,top],[centerX+halfWidth,top],[centerX+halfWidth-slant,top-roof],[centerX-halfWidth+slant,top-roof]],theme.roof);
   ctx.fillStyle=theme.side;ctx.fillRect(centerX+halfWidth*.55,top,halfWidth*.45,Math.max(1,bottom-top));
+  ctx.fillStyle=theme.night?"#9fc9bd2b":"#ecf3d31c";ctx.fillRect(centerX-halfWidth,top,Math.max(1,halfWidth*.08),Math.max(1,bottom-top));
+
+  if(!theme.desert&&building.height>70&&bottom-top>18) {
+    // 일부 고층 건물은 위쪽 폭을 줄인 단차형 실루엣을 사용합니다.
+    const tierHeight=(bottom-top)*.32,tierInset=halfWidth*.17;
+    ctx.fillStyle=shade>.5?theme.buildings[1]:theme.buildings[0];
+    ctx.fillRect(centerX-halfWidth+tierInset,top-tierHeight*.2,halfWidth*2-tierInset*2,tierHeight);
+  }
 
   // 높은 건물에는 옥상 설비와 안테나를 더해 반복되는 상자 모양을 깨 줍니다.
   if(!theme.desert&&building.height>62&&z<2500) {
@@ -1257,7 +1350,7 @@ function drawCityBuilding(building,theme) {
 
   if(z<1900&&bottom-top>9&&halfWidth>3) {
     ctx.fillStyle=theme.window;ctx.globalAlpha=haze*(theme.night ? .95 : .62);
-    const columns=halfWidth>9?3:2,rows=clamp(Math.floor((bottom-top)/9),1,5);
+    const columns=halfWidth>14?4:halfWidth>8?3:2,rows=clamp(Math.floor((bottom-top)/7),1,10);
     for(let row=0;row<rows;row++) for(let column=0;column<columns;column++) {
       if(sceneryNoise(building.seed+row*7+column*3)<.44) continue;
       const wx=centerX-halfWidth+(column+1)*(halfWidth*2)/(columns+1);
@@ -1277,6 +1370,12 @@ function drawDesertBaseDetails(baseZ) {
     runwayRectangle(side*178,z+88,side*316,z+168,"#9c876d");
     runwayRectangle(side*190,z+97,side*304,z+157,"#725f4e");
     for(let pad=0;pad<3;pad++) drawGroundEllipse(side*(185+pad*60),z-35,22,15,"#b9a27a66");
+    // 태양광 패널과 경계등을 기지 주변에 반복 배치합니다.
+    for(let panel=0;panel<4;panel++) {
+      const px=side*(430+panel*22),pz=z+60+(panel%2)*35;
+      drawGroundEllipse(px,pz,14,7,"#213d496e");
+      drawProjectedMarker(px,pz-12,"#efc978",1.35);
+    }
   }
 }
 
@@ -1316,6 +1415,15 @@ function drawOceanScenery() {
     const offset=(sceneryNoise(z*.01)-.5)*360;
     runwayRectangle(-900+offset,z,-260+offset,z+3,"#a9dae033");
     runwayRectangle(180-offset,z,760-offset,z+3,"#a9dae02b");
+  }
+  // 서로 다른 간격의 잔물결과 얕은 산호초가 수면의 크기와 방향을 읽게 합니다.
+  for(let z=waveBase-1900;z<waveBase+4300;z+=145) {
+    const seed=z*.017,offset=(sceneryNoise(seed)-.5)*950,length=55+sceneryNoise(seed+4)*170;
+    runwayRectangle(offset-length,z,offset+length,z+1.2,"#d8f4ed20");
+  }
+  for(let reef=0;reef<5;reef++) {
+    const seed=(rowBase+reef)*5.71;
+    drawGroundEllipse((sceneryNoise(seed)-.5)*1350,rowBase*700+reef*520-900,70,25,"#55a6a425");
   }
   // 태양/달이 비치는 수면 중심부에 짧은 반사광을 겹칩니다.
   for(let i=0;i<18;i++) {
