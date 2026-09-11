@@ -80,8 +80,8 @@ const TERRAIN_TEXTURE_URLS = {
 };
 const MAPLIBRE_VERSION="5.6.0";
 const MAPLIBRE_URL=`https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist/maplibre-gl.js`;
-const OPENFREEMAP_STYLE="https://tiles.openfreemap.org/styles/liberty";
-// Canvas 테마를 OpenFreeMap에서 보여줄 실제 지역에 연결합니다.
+const VERSATILES_SATELLITE_STYLE="https://tiles.versatiles.org/assets/styles/satellite/style.json";
+// Canvas 테마를 실제 위성 배경에서 보여줄 지역에 연결합니다.
 const EARTH_LOCATIONS = {
   "mountain-city":{label:"인스브루크",lat:47.2602,lon:11.3439},
   "ocean-islands":{label:"제주 해안",lat:33.4982,lon:126.4912},
@@ -151,7 +151,7 @@ function setEarthStatus(message,type="") {
   const status=$("earth-status");status.textContent=message;status.className=`earth-status${type?` ${type}`:""}`;
 }
 
-// MapLibre는 무료 지도를 켤 때만 내려받아 기존 Canvas 모드의 초기 로딩을 가볍게 유지합니다.
+// MapLibre는 무료 위성 배경을 켤 때만 내려받아 기존 Canvas 모드의 초기 로딩을 가볍게 유지합니다.
 function loadMapLibrary() {
   if(window.maplibregl)return Promise.resolve(window.maplibregl);
   if(realEarth.libraryPromise)return realEarth.libraryPromise;
@@ -172,21 +172,11 @@ function destroyEarthViewer() {
   $("map-container").replaceChildren();
 }
 
-function addFreeMapBuildings(map) {
-  if(map.getLayer("aeronaut-3d-buildings"))return;
-  const layers=map.getStyle()?.layers||[];
-  const buildingLayer=layers.find(layer=>layer["source-layer"]==="building"&&layer.source);
-  if(!buildingLayer)return;
-  const firstLabel=layers.find(layer=>layer.type==="symbol"&&layer.layout?.["text-field"]);
-  map.addLayer({
-    id:"aeronaut-3d-buildings",type:"fill-extrusion",source:buildingLayer.source,"source-layer":"building",minzoom:13,
-    paint:{
-      "fill-extrusion-color":["interpolate",["linear"],["zoom"],13,"#6f8581",17,"#aec1ba"],
-      "fill-extrusion-height":["coalesce",["to-number",["get","render_height"]],["to-number",["get","height"]],10],
-      "fill-extrusion-base":["coalesce",["to-number",["get","render_min_height"]],["to-number",["get","min_height"]],0],
-      "fill-extrusion-opacity":.78
-    }
-  },firstLabel?.id);
+function hideSatelliteLabels(map) {
+  // 비행 중 지명과 POI가 지형처럼 보이는 문제를 막고 사진 자체에 집중합니다.
+  for(const layer of map.getStyle()?.layers||[]){
+    if(layer.type==="symbol")map.setLayoutProperty(layer.id,"visibility","none");
+  }
 }
 
 async function createEarthViewer() {
@@ -195,7 +185,7 @@ async function createEarthViewer() {
   destroyEarthViewer();
   const location=EARTH_LOCATIONS[worldMap];
   const viewer=new maplibregl.Map({
-    container:"map-container",style:OPENFREEMAP_STYLE,center:[location.lon,location.lat],zoom:15.5,
+    container:"map-container",style:VERSATILES_SATELLITE_STYLE,center:[location.lon,location.lat],zoom:15.5,
     bearing:flight.heading,pitch:78,roll:-flight.roll,maxPitch:85,rollEnabled:true,
     interactive:false,attributionControl:true,renderWorldCopies:false,
     localIdeographFontFamily:"Noto Sans, Malgun Gothic, sans-serif"
@@ -206,16 +196,16 @@ async function createEarthViewer() {
   });
   realEarth.viewer=viewer;
   await new Promise((resolve,reject)=>{
-    const timeout=setTimeout(()=>reject(new Error("무료 지도 응답 시간이 초과되었습니다.")),30000);
-    viewer.once("load",()=>{clearTimeout(timeout);try{addFreeMapBuildings(viewer);}catch(error){console.warn("3D 건물 레이어 생략",error);}resolve();});
-    viewer.once("error",event=>{if(!viewer.loaded()){clearTimeout(timeout);reject(event.error||new Error("무료 지도 데이터를 불러오지 못했습니다."));}});
+    const timeout=setTimeout(()=>reject(new Error("위성 배경 응답 시간이 초과되었습니다.")),30000);
+    viewer.once("load",()=>{clearTimeout(timeout);try{hideSatelliteLabels(viewer);}catch(error){console.warn("위성 라벨 숨김 생략",error);}resolve();});
+    viewer.once("error",event=>{if(!viewer.loaded()){clearTimeout(timeout);reject(event.error||new Error("위성 영상 데이터를 불러오지 못했습니다."));}});
   });
   return viewer;
 }
 
 async function enableRealEarth() {
   if(realEarth.loading)return;
-  realEarth.loading=true;$("earth-enable-button").disabled=true;setEarthStatus("무료 실제 지도를 불러오는 중입니다…");
+  realEarth.loading=true;$("earth-enable-button").disabled=true;setEarthStatus("실제 위성·항공사진을 불러오는 중입니다…");
   // 숨겨진 요소는 WebGL 크기를 계산할 수 없으므로 초기화 중에도 컨테이너를 열어 둡니다.
   $("map-container").hidden=false;
   try {
@@ -223,15 +213,15 @@ async function enableRealEarth() {
     realEarth.enabled=true;realEarth.restore=true;
     try{localStorage.removeItem("aeronaut-google-map-key");localStorage.setItem("aeronaut-real-earth","true");}catch{}
     $("map-container").hidden=false;$("flight").classList.add("real-earth");
-    $("earth-button").textContent="무료 지도 ON";$("earth-button").setAttribute("aria-pressed","true");
-    $("render-mode-label").textContent="FREE MAP SIMULATOR";
-    setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[worldMap].label} 무료 3D 지도`,"active");
+    $("earth-button").textContent="실제 위성 ON";$("earth-button").setAttribute("aria-pressed","true");
+    $("render-mode-label").textContent="SATELLITE SIMULATOR";
+    setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[worldMap].label} 실제 위성 배경`,"active");
     realEarth.viewer.resize();syncRealEarthCamera(true);setEarthPanel(false,false);
-    showMessage(`무료 실제 지도 연결 · ${EARTH_LOCATIONS[worldMap].label}`,false,4500);
+    showMessage(`실제 위성 배경 연결 · ${EARTH_LOCATIONS[worldMap].label}`,false,4500);
   } catch(error) {
-    console.error("무료 지도 초기화 실패",error);
+    console.error("실제 위성 배경 초기화 실패",error);
     realEarth.enabled=false;destroyEarthViewer();$("map-container").hidden=true;$("flight").classList.remove("real-earth");
-    $("earth-button").textContent="무료 지도 오류";$("earth-button").setAttribute("aria-pressed","false");
+    $("earth-button").textContent="위성 배경 오류";$("earth-button").setAttribute("aria-pressed","false");
     setEarthStatus(`연결 실패 · ${error?.message||"인터넷 연결을 확인해주세요."}`,"error");
   } finally {realEarth.loading=false;$("earth-enable-button").disabled=false;}
 }
@@ -240,9 +230,9 @@ function disableRealEarth(notify=true) {
   realEarth.enabled=false;realEarth.restore=false;
   try{localStorage.setItem("aeronaut-real-earth","false");}catch{}
   $("map-container").hidden=true;$("flight").classList.remove("real-earth");
-  $("earth-button").textContent="무료 지도 OFF";$("earth-button").setAttribute("aria-pressed","false");
+  $("earth-button").textContent="실제 위성 OFF";$("earth-button").setAttribute("aria-pressed","false");
   $("render-mode-label").textContent="CANVAS SIMULATOR";
-  setEarthStatus("Canvas 배경을 사용 중입니다. 무료 지도를 언제든 다시 켤 수 있습니다.");
+  setEarthStatus("Canvas 배경을 사용 중입니다. 실제 위성 배경을 언제든 다시 켤 수 있습니다.");
   if(notify){setEarthPanel(false,false);showMessage("Canvas 배경으로 돌아왔습니다.",false,3500);}
 }
 
@@ -2477,7 +2467,7 @@ function setEarthPanel(open,restoreFocus=true) {
   if(open) {
     setWeatherPanel(false,false);setMissionPanel(false,false);
     if(!$('map-panel').hidden){$('map-panel').hidden=true;$('map-button').setAttribute('aria-expanded','false');}
-    if(realEarth.enabled)setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[worldMap].label} 무료 3D 지도`,"active");
+    if(realEarth.enabled)setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[worldMap].label} 실제 위성 배경`,"active");
   }
   $("earth-panel").hidden=!open;$("earth-button").setAttribute("aria-expanded",String(open));
   if(open)$(realEarth.enabled?"earth-disable-button":"earth-enable-button").focus();else if(restoreFocus)$("earth-button").focus({preventScroll:true});
@@ -2554,7 +2544,7 @@ function selectWorldMap(map,notify=true) {
   $("flight").dataset.map=map;
   $("map-button").textContent=`맵 · ${MAP_THEMES[map].label}`;
   document.querySelectorAll("[data-map]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.map===map)));
-  if(realEarth.enabled){syncRealEarthCamera(true);setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[map].label} 무료 3D 지도`,"active");}
+  if(realEarth.enabled){syncRealEarthCamera(true);setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[map].label} 실제 위성 배경`,"active");}
   if(notify) {
     setMapPanel(false);
     showMessage(realEarth.enabled?`${EARTH_LOCATIONS[map].label} 실제 지역으로 이동했습니다.`:`${MAP_THEMES[map].label} 맵으로 변경했습니다.`,false,3500);

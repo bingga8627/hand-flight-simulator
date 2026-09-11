@@ -7,7 +7,7 @@
   <meta name="description" content="양손 제스처로 조종하는 Canvas 1인칭 비행 시뮬레이터">
   <title>AERONAUT — Hand Flight Simulator</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="style.css?v=20260911-22">
+  <link rel="stylesheet" href="style.css?v=20260912-1">
 </head>
 <body>
   <main class="app">
@@ -22,10 +22,10 @@
 
     <nav class="training-bar" aria-label="비행 모드">
       <div class="training-modes"><button id="free-flight-button" class="quiet" aria-pressed="true">자유 비행</button><button id="takeoff-button" class="quiet" aria-pressed="false">지상 출발</button><button id="approach-button" class="quiet" aria-pressed="false">착륙 연습</button><button id="mission-button" class="quiet" aria-pressed="false" aria-expanded="false" aria-controls="mission-panel">통합 미션</button></div>
-      <div class="training-controls"><span id="mode-label">FREE FLIGHT</span><button id="map-button" class="quiet" aria-expanded="false" aria-controls="map-panel">맵 · 산악 도시</button><button id="earth-button" class="quiet" aria-expanded="false" aria-controls="earth-panel">무료 지도 OFF</button><button id="weather-button" class="quiet" aria-expanded="false" aria-controls="weather-panel">날씨 · 맑음</button><button id="audio-button" class="quiet" aria-pressed="true">사운드 ON</button><button id="pause-button" class="quiet">일시정지</button><button id="brake-button" class="quiet" aria-pressed="false" disabled>브레이크 OFF</button></div>
+      <div class="training-controls"><span id="mode-label">FREE FLIGHT</span><button id="map-button" class="quiet" aria-expanded="false" aria-controls="map-panel">맵 · 산악 도시</button><button id="earth-button" class="quiet" aria-expanded="false" aria-controls="earth-panel">실제 위성 OFF</button><button id="weather-button" class="quiet" aria-expanded="false" aria-controls="weather-panel">날씨 · 맑음</button><button id="audio-button" class="quiet" aria-pressed="true">사운드 ON</button><button id="pause-button" class="quiet">일시정지</button><button id="brake-button" class="quiet" aria-pressed="false" disabled>브레이크 OFF</button></div>
     </nav>
     <section id="flight" class="flight" aria-label="1인칭 비행 시뮬레이터">
-      <div id="map-container" aria-label="OpenFreeMap 실제 지도 배경" hidden></div>
+      <div id="map-container" aria-label="VersaTiles 실제 위성·항공사진 배경" hidden></div>
       <canvas id="flight-canvas" aria-label="하늘, 지면과 조종석이 표시되는 비행 화면"></canvas>
       <div class="mission"><span>TRAINING AIRSPACE</span><strong>당신의 손으로, 비행하세요.</strong><small>오른손은 조종간 · 왼손은 스로틀</small></div>
       <div class="heading"><span>270</span><span>285</span><strong id="heading-value">300</strong><span>315</span><span>330</span><i>▼</i></div>
@@ -48,11 +48,11 @@
         </div>
       </section>
       <section id="earth-panel" class="map-panel earth-panel" aria-labelledby="earth-title" hidden>
-        <header><div><span>FREE REAL MAP</span><h2 id="earth-title">무료 실제 지도 배경</h2></div><button id="earth-close-button" class="quiet" aria-label="무료 지도 설정 닫기">×</button></header>
-        <p>OpenStreetMap 데이터를 OpenFreeMap과 MapLibre로 표시합니다. 가입·결제·API 키 없이 실제 도로와 3D 건물을 비행 배경으로 사용할 수 있습니다.</p>
-        <small>항공사진이 아닌 실제 지도 데이터 기반의 3D 지도입니다. 처음 연결하지 못하면 Canvas 배경을 유지하며 언제든 다시 시도할 수 있습니다.</small>
-        <div id="earth-status" class="earth-status" role="status">무료 지도를 바로 켤 수 있습니다.</div>
-        <div class="earth-actions"><button id="earth-disable-button" class="quiet" type="button">Canvas 배경 사용</button><button id="earth-enable-button" class="primary" type="button">무료 지도 켜기</button></div>
+        <header><div><span>FREE SATELLITE</span><h2 id="earth-title">무료 실제 위성 배경</h2></div><button id="earth-close-button" class="quiet" aria-label="위성 배경 설정 닫기">×</button></header>
+        <p>VersaTiles의 실제 위성·항공사진과 지형을 MapLibre로 표시합니다. 가입·결제·API 키 없이 실제 지표 모습을 비행 배경으로 사용할 수 있습니다.</p>
+        <small>촬영 시점과 최대 해상도는 지역에 따라 다릅니다. 처음 연결하지 못하면 Canvas 배경을 유지하며 언제든 다시 시도할 수 있습니다.</small>
+        <div id="earth-status" class="earth-status" role="status">무료 위성 배경을 바로 켤 수 있습니다.</div>
+        <div class="earth-actions"><button id="earth-disable-button" class="quiet" type="button">Canvas 배경 사용</button><button id="earth-enable-button" class="primary" type="button">실제 위성 켜기</button></div>
       </section>
       <section id="weather-panel" class="map-panel weather-panel" aria-labelledby="weather-title" hidden>
         <header><div><span>ATMOSPHERE CONTROL</span><h2 id="weather-title">비행 날씨 선택</h2></div><button id="weather-close-button" class="quiet" aria-label="날씨 선택 닫기">×</button></header>
@@ -138,6 +138,6 @@
   </main>
   <!-- 일반 스크립트로 시작해야 파일을 직접 열어도 실행 방법을 안내할 수 있습니다.
        MediaPipe는 main.js 내부에서 필요한 시점에 동적 import합니다. -->
-  <script defer src="main.js?v=20260911-50"></script>
+  <script defer src="main.js?v=20260912-1"></script>
 </body>
 </html>
