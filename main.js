@@ -78,15 +78,13 @@ const TERRAIN_TEXTURE_URLS = {
   "desert-base":"assets/terrain/terrain-desert.png",
   "night-city":"assets/terrain/terrain-night.png"
 };
-const MAPLIBRE_VERSION="5.6.0";
-const MAPLIBRE_URL=`https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist/maplibre-gl.js`;
-const VERSATILES_SATELLITE_STYLE="https://tiles.versatiles.org/assets/styles/satellite/style.json";
-// Canvas 테마를 실제 위성 배경에서 보여줄 지역에 연결합니다.
-const EARTH_LOCATIONS = {
-  "mountain-city":{label:"인스브루크",lat:47.2602,lon:11.3439},
-  "ocean-islands":{label:"제주 해안",lat:33.4982,lon:126.4912},
-  "desert-base":{label:"라스베이거스 사막",lat:36.1548,lon:-115.073},
-  "night-city":{label:"서울 도심",lat:37.5665,lon:126.978}
+// 지도 타일 대신 조종석 앞에서 보이는 로컬 파노라마를 사용합니다.
+// 네트워크나 API 키 없이도 같은 품질로 표시되며 각 맵의 분위기와 연결됩니다.
+const REAL_SCENERY_URLS = {
+  "mountain-city":"assets/scenery/scenery-mountain-v1.png",
+  "ocean-islands":"assets/scenery/scenery-ocean-v1.png",
+  "desert-base":"assets/scenery/scenery-desert-v1.png",
+  "night-city":"assets/scenery/scenery-night-v1.png"
 };
 const WEATHER_PRESETS = {
   clear:{label:"맑음",clouds:1,haze:0,wind:.08},
@@ -125,8 +123,7 @@ let worldMap = (()=>{try{const saved=localStorage.getItem("aeronaut-map");return
 let weatherMode = (()=>{try{const saved=localStorage.getItem("aeronaut-weather");return WEATHER_PRESETS[saved]?saved:"clear";}catch{return "clear";}})();
 let selectedMissionId = (()=>{try{const saved=localStorage.getItem("aeronaut-mission");return MISSION_PROFILES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
 const realEarth={
-  enabled:false,viewer:null,loading:false,libraryPromise:null,
-  restore:(()=>{try{return localStorage.getItem("aeronaut-real-earth")==="true";}catch{return false;}})()
+  enabled:(()=>{try{return localStorage.getItem("aeronaut-real-earth")!=="false";}catch{return true;}})()
 };
 // 이전 Google 버전에서 브라우저에 저장했을 수 있는 키도 업그레이드 즉시 삭제합니다.
 try{localStorage.removeItem("aeronaut-google-map-key");}catch{}
@@ -136,6 +133,15 @@ function terrainTexture(map) {
   const image=new Image();image.decoding="async";image.src=TERRAIN_TEXTURE_URLS[map];
   terrainTextures[map]=image;return image;
 }
+const sceneryImages={};
+function sceneryImage(map) {
+  if(sceneryImages[map])return sceneryImages[map];
+  const image=new Image();image.decoding="async";image.src=REAL_SCENERY_URLS[map];
+  image.addEventListener("load",()=>{if(map===worldMap&&realEarth.enabled)setEarthStatus(`준비됨 · ${MAP_THEMES[map].label} 전방 풍경`,"active");},{once:true});
+  image.addEventListener("error",()=>{if(map===worldMap)setEarthStatus("배경 이미지를 읽지 못했습니다. 기본 Canvas 배경을 표시합니다.","error");},{once:true});
+  sceneryImages[map]=image;return image;
+}
+Object.keys(REAL_SCENERY_URLS).forEach(sceneryImage);
 // 기준 위치는 현재 카메라 연결 동안만 유지합니다. 이미지나 랜드마크는 저장하지 않습니다.
 const calibration = { active: false, neutral: null, palmScale: null, palmShape: null, started: 0, held: 0, lastSample: 0, reference: null, referenceScale: null, sumScale: 0, sumShape: 0, sumX: 0, sumY: 0, count: 0, note: "이지 조종은 손을 보여주면 자동으로 시작합니다. C 키는 표시 중심을 맞출 때만 사용합니다." };
 
@@ -151,101 +157,23 @@ function setEarthStatus(message,type="") {
   const status=$("earth-status");status.textContent=message;status.className=`earth-status${type?` ${type}`:""}`;
 }
 
-// MapLibre는 무료 위성 배경을 켤 때만 내려받아 기존 Canvas 모드의 초기 로딩을 가볍게 유지합니다.
-function loadMapLibrary() {
-  if(window.maplibregl)return Promise.resolve(window.maplibregl);
-  if(realEarth.libraryPromise)return realEarth.libraryPromise;
-  realEarth.libraryPromise=new Promise((resolve,reject)=>{
-    const script=document.createElement("script");
-    const timeout=setTimeout(()=>reject(new Error("MapLibre 로딩 시간이 초과되었습니다.")),30000);
-    script.src=MAPLIBRE_URL;script.async=true;
-    script.onload=()=>{clearTimeout(timeout);window.maplibregl?resolve(window.maplibregl):reject(new Error("MapLibre를 시작할 수 없습니다."));};
-    script.onerror=()=>{clearTimeout(timeout);reject(new Error("MapLibre CDN을 불러오지 못했습니다."));};
-    document.head.appendChild(script);
-  }).catch(error=>{realEarth.libraryPromise=null;throw error;});
-  return realEarth.libraryPromise;
-}
-
-function destroyEarthViewer() {
-  if(realEarth.viewer)realEarth.viewer.remove();
-  realEarth.viewer=null;
-  $("map-container").replaceChildren();
-}
-
-function hideSatelliteLabels(map) {
-  // 비행 중 지명과 POI가 지형처럼 보이는 문제를 막고 사진 자체에 집중합니다.
-  for(const layer of map.getStyle()?.layers||[]){
-    if(layer.type==="symbol")map.setLayoutProperty(layer.id,"visibility","none");
-  }
-}
-
-async function createEarthViewer() {
-  const maplibregl=await loadMapLibrary();
-  if(realEarth.viewer)return realEarth.viewer;
-  destroyEarthViewer();
-  const location=EARTH_LOCATIONS[worldMap];
-  const viewer=new maplibregl.Map({
-    container:"map-container",style:VERSATILES_SATELLITE_STYLE,center:[location.lon,location.lat],zoom:15.5,
-    bearing:flight.heading,pitch:78,roll:-flight.roll,maxPitch:85,rollEnabled:true,
-    interactive:false,attributionControl:true,renderWorldCopies:false,
-    localIdeographFontFamily:"Noto Sans, Malgun Gothic, sans-serif"
-  });
-  // 스타일에 아이콘이 빠진 소규모 POI는 투명 픽셀로 대체해 렌더링 경고와 불필요한 재시도를 막습니다.
-  viewer.on("styleimagemissing",event=>{
-    if(!viewer.hasImage(event.id))viewer.addImage(event.id,{width:1,height:1,data:new Uint8Array([0,0,0,0])});
-  });
-  realEarth.viewer=viewer;
-  await new Promise((resolve,reject)=>{
-    const timeout=setTimeout(()=>reject(new Error("위성 배경 응답 시간이 초과되었습니다.")),30000);
-    viewer.once("load",()=>{clearTimeout(timeout);try{hideSatelliteLabels(viewer);}catch(error){console.warn("위성 라벨 숨김 생략",error);}resolve();});
-    viewer.once("error",event=>{if(!viewer.loaded()){clearTimeout(timeout);reject(event.error||new Error("위성 영상 데이터를 불러오지 못했습니다."));}});
-  });
-  return viewer;
-}
-
-async function enableRealEarth() {
-  if(realEarth.loading)return;
-  realEarth.loading=true;$("earth-enable-button").disabled=true;setEarthStatus("실제 위성·항공사진을 불러오는 중입니다…");
-  // 숨겨진 요소는 WebGL 크기를 계산할 수 없으므로 초기화 중에도 컨테이너를 열어 둡니다.
-  $("map-container").hidden=false;
-  try {
-    await createEarthViewer();
-    realEarth.enabled=true;realEarth.restore=true;
-    try{localStorage.removeItem("aeronaut-google-map-key");localStorage.setItem("aeronaut-real-earth","true");}catch{}
-    $("map-container").hidden=false;$("flight").classList.add("real-earth");
-    $("earth-button").textContent="실제 위성 ON";$("earth-button").setAttribute("aria-pressed","true");
-    $("render-mode-label").textContent="SATELLITE SIMULATOR";
-    setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[worldMap].label} 실제 위성 배경`,"active");
-    realEarth.viewer.resize();syncRealEarthCamera(true);setEarthPanel(false,false);
-    showMessage(`실제 위성 배경 연결 · ${EARTH_LOCATIONS[worldMap].label}`,false,4500);
-  } catch(error) {
-    console.error("실제 위성 배경 초기화 실패",error);
-    realEarth.enabled=false;destroyEarthViewer();$("map-container").hidden=true;$("flight").classList.remove("real-earth");
-    $("earth-button").textContent="위성 배경 오류";$("earth-button").setAttribute("aria-pressed","false");
-    setEarthStatus(`연결 실패 · ${error?.message||"인터넷 연결을 확인해주세요."}`,"error");
-  } finally {realEarth.loading=false;$("earth-enable-button").disabled=false;}
+function enableRealEarth(notify=true) {
+  realEarth.enabled=true;
+  try{localStorage.removeItem("aeronaut-google-map-key");localStorage.setItem("aeronaut-real-earth","true");}catch{}
+  $("earth-button").textContent="사실적 배경 ON";$("earth-button").setAttribute("aria-pressed","true");
+  $("render-mode-label").textContent="PHOTOREAL SCENERY";
+  const image=sceneryImage(worldMap);
+  setEarthStatus(image.complete&&image.naturalWidth?`준비됨 · ${MAP_THEMES[worldMap].label} 전방 풍경`:"사실적 배경 이미지를 준비하는 중입니다…","active");
+  if(notify){setEarthPanel(false,false);showMessage(`${MAP_THEMES[worldMap].label} 사실적 전방 풍경을 적용했습니다.`,false,4200);}
 }
 
 function disableRealEarth(notify=true) {
-  realEarth.enabled=false;realEarth.restore=false;
+  realEarth.enabled=false;
   try{localStorage.setItem("aeronaut-real-earth","false");}catch{}
-  $("map-container").hidden=true;$("flight").classList.remove("real-earth");
-  $("earth-button").textContent="실제 위성 OFF";$("earth-button").setAttribute("aria-pressed","false");
+  $("earth-button").textContent="사실적 배경 OFF";$("earth-button").setAttribute("aria-pressed","false");
   $("render-mode-label").textContent="CANVAS SIMULATOR";
-  setEarthStatus("Canvas 배경을 사용 중입니다. 실제 위성 배경을 언제든 다시 켤 수 있습니다.");
-  if(notify){setEarthPanel(false,false);showMessage("Canvas 배경으로 돌아왔습니다.",false,3500);}
-}
-
-function syncRealEarthCamera(force=false) {
-  if(!realEarth.enabled||!realEarth.viewer)return;
-  const location=EARTH_LOCATIONS[worldMap];if(!location)return;
-  const runwayHeading=radians(RUNWAY.heading),east=Math.sin(runwayHeading)*lesson.z+Math.cos(runwayHeading)*lesson.x;
-  const north=Math.cos(runwayHeading)*lesson.z-Math.sin(runwayHeading)*lesson.x;
-  const latitude=location.lat+north/110540;
-  const longitude=location.lon+east/(111320*Math.cos(radians(location.lat)));
-  const zoom=clamp(18.7-Math.log2(Math.max(35,flight.altitude+35)/70),12.2,18);
-  realEarth.viewer.jumpTo({center:[longitude,latitude],bearing:flight.heading,pitch:clamp(78+flight.pitch*.18,70,84),roll:-flight.roll,zoom});
-  if(force)realEarth.viewer.triggerRepaint();
+  setEarthStatus("기본 Canvas 배경을 사용 중입니다.");
+  if(notify){setEarthPanel(false,false);showMessage("기본 Canvas 배경으로 전환했습니다.",false,3500);}
 }
 
 // 외부 음원 파일 없이 Web Audio 노드만 사용합니다. 브라우저 정책상 첫 사용자 입력 뒤에 시작됩니다.
@@ -1263,20 +1191,45 @@ function drawWorld(now) {
   if (lesson.mode === "mission") drawGatePassEffect(now);
 }
 
-// 실제 지형 모드에서는 배경을 칠하지 않고 기존 Canvas의 훈련 표식과 날씨 효과만 투명하게 겹칩니다.
+// 전방 파노라마를 수평선 좌표계에 놓아 Roll, Pitch, 방향 변화가 풍경 전체에 적용되게 합니다.
 function drawRealEarthCanvas(now) {
-  // 밝은 지도 위에서도 연녹색 HUD가 읽히도록 조종석 유리와 같은 약한 청록 음영을 겹칩니다.
+  const image=sceneryImage(worldMap);
+  if(!image.complete||!image.naturalWidth){realEarth.enabled=false;drawWorld(now);realEarth.enabled=true;return;}
+  const theme=MAP_THEMES[worldMap],weather=WEATHER_PRESETS[weatherMode];
+  const extent=Math.hypot(width,height)*1.3;
   ctx.save();
-  const glass=ctx.createLinearGradient(0,0,0,height);
-  glass.addColorStop(0,worldMap==="night-city"?"rgba(2,9,22,.58)":"rgba(2,13,18,.16)");
-  glass.addColorStop(.65,worldMap==="night-city"?"rgba(2,9,22,.48)":"rgba(2,15,19,.24)");
-  glass.addColorStop(1,"rgba(1,10,15,.34)");ctx.fillStyle=glass;ctx.fillRect(0,0,width,height);ctx.restore();
-  ctx.save();ctx.translate(width/2,height*.46);ctx.rotate(-radians(flight.roll));
+  ctx.translate(width/2,height*.46);
+  ctx.rotate(-radians(flight.roll));
   ctx.translate(0,flight.pitch*height*.012);
+
+  // 이미지의 위쪽 약 30%에 있는 자연 수평선을 Canvas 원점과 맞춥니다.
+  // 넓은 이미지를 좌우로 반복하고 홀수 타일을 반전해 방향을 끝없이 바꿔도 빈 공간이 생기지 않습니다.
+  const imageAspect=image.naturalWidth/image.naturalHeight;
+  const drawHeight=Math.max(height*1.72,extent*.82);
+  const drawWidth=drawHeight*imageAspect;
+  const headingPhase=((((flight.heading-RUNWAY.heading)/360)+(lesson.x*.000018))%1+1)%1;
+  const travelSway=Math.sin((lesson.z+flight.distance*900)*.00055)*drawWidth*.012;
+  const offset=(headingPhase+.5)*drawWidth+travelSway;
+  const top=-drawHeight*.29;
+  for(let tile=-2;tile<=2;tile++) {
+    const x=tile*drawWidth-offset-1;
+    ctx.save();ctx.translate(x,top);
+    if(Math.abs(tile)%2===1){ctx.translate(drawWidth+2,0);ctx.scale(-1,1);}
+    ctx.drawImage(image,0,0,drawWidth+2,drawHeight);ctx.restore();
+  }
+
+  // 조종석 유리의 약한 색과 원근 안개만 더해 사진과 HUD의 명암을 맞춥니다.
+  const glass=ctx.createLinearGradient(0,-height*.5,0,height*.7);
+  glass.addColorStop(0,theme.night?"rgba(1,7,17,.24)":"rgba(7,27,34,.04)");
+  glass.addColorStop(.55,theme.night?"rgba(2,10,20,.18)":"rgba(8,31,31,.08)");
+  glass.addColorStop(1,"rgba(2,14,16,.24)");
+  ctx.fillStyle=glass;ctx.fillRect(-extent,-extent,extent*2,extent*2);
   if(lesson.mode!=="free")drawRunway();
   if(lesson.mode==="mission"&&!mission.returning)drawCheckpointRings();
-  drawPitchLadder();ctx.restore();
-  drawWeatherEffects(now,WEATHER_PRESETS[weatherMode]);
+  drawPitchLadder();
+  ctx.restore();
+  drawMapColorGrade(theme);
+  drawWeatherEffects(now,weather);
   drawWindStreaks(now);
   if(lesson.mode==="mission"&&!mission.returning)drawCheckpointNavigator();
   if(lesson.mode==="mission")drawGatePassEffect(now);
@@ -2446,7 +2399,6 @@ function animate(now) {
   trackHands(now);
   updateFlight(dt,now);
   updateFlightEffects(now);
-  syncRealEarthCamera();
   drawWorld(now);drawCockpit(now);drawFlightDirector();drawStick();
   updateEngineSound();
   if(now-lastHud>100){updateHud();lastHud=now;}
@@ -2467,7 +2419,7 @@ function setEarthPanel(open,restoreFocus=true) {
   if(open) {
     setWeatherPanel(false,false);setMissionPanel(false,false);
     if(!$('map-panel').hidden){$('map-panel').hidden=true;$('map-button').setAttribute('aria-expanded','false');}
-    if(realEarth.enabled)setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[worldMap].label} 실제 위성 배경`,"active");
+    if(realEarth.enabled)setEarthStatus(`준비됨 · ${MAP_THEMES[worldMap].label} 전방 풍경`,"active");
   }
   $("earth-panel").hidden=!open;$("earth-button").setAttribute("aria-expanded",String(open));
   if(open)$(realEarth.enabled?"earth-disable-button":"earth-enable-button").focus();else if(restoreFocus)$("earth-button").focus({preventScroll:true});
@@ -2544,10 +2496,10 @@ function selectWorldMap(map,notify=true) {
   $("flight").dataset.map=map;
   $("map-button").textContent=`맵 · ${MAP_THEMES[map].label}`;
   document.querySelectorAll("[data-map]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.map===map)));
-  if(realEarth.enabled){syncRealEarthCamera(true);setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[map].label} 실제 위성 배경`,"active");}
+  if(realEarth.enabled)setEarthStatus(`준비됨 · ${MAP_THEMES[map].label} 전방 풍경`,"active");
   if(notify) {
     setMapPanel(false);
-    showMessage(realEarth.enabled?`${EARTH_LOCATIONS[map].label} 실제 지역으로 이동했습니다.`:`${MAP_THEMES[map].label} 맵으로 변경했습니다.`,false,3500);
+    showMessage(`${MAP_THEMES[map].label} 맵으로 변경했습니다.`,false,3500);
   }
 }
 
@@ -2641,10 +2593,10 @@ document.addEventListener("visibilitychange",() => {
   clearHands(); lastFrame=0;
   if (document.hidden && lesson.mode !== "free" && !lesson.result) lesson.paused = true;
 });
-window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();destroyEarthViewer();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
+window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
 new ResizeObserver(resizeCanvas).observe(canvas);
 selectWorldMap(worldMap,false);selectWeather(weatherMode,false);selectMissionCard(selectedMissionId);refreshMissionBests();resizeCanvas();updateHud();requestAnimationFrame(animate);
-if(realEarth.restore)enableRealEarth();
+if(realEarth.enabled)enableRealEarth(false);else disableRealEarth(false);
 if (window.location.protocol === "file:") {
   $("local-server-link").hidden = false;
   showMessage("파일을 직접 열었습니다. 아래 버튼으로 로컬 서버에서 열거나 VS Code Live Server를 사용해주세요.", true);
