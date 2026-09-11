@@ -78,14 +78,6 @@ const TERRAIN_TEXTURE_URLS = {
   "desert-base":"assets/terrain/terrain-desert.png",
   "night-city":"assets/terrain/terrain-night.png"
 };
-// 지도 타일 대신 조종석 앞에서 보이는 로컬 파노라마를 사용합니다.
-// 네트워크나 API 키 없이도 같은 품질로 표시되며 각 맵의 분위기와 연결됩니다.
-const REAL_SCENERY_URLS = {
-  "mountain-city":"assets/scenery/scenery-mountain-v1.png",
-  "ocean-islands":"assets/scenery/scenery-ocean-v1.png",
-  "desert-base":"assets/scenery/scenery-desert-v1.png",
-  "night-city":"assets/scenery/scenery-night-v1.png"
-};
 const WEATHER_PRESETS = {
   clear:{label:"맑음",clouds:1,haze:0,wind:.08},
   sunset:{label:"석양",clouds:1.25,haze:.08,wind:.12,sky:["#162844","#a64f50","#f2a561"],sunset:true},
@@ -122,26 +114,14 @@ let connectionStage = "idle";
 let worldMap = (()=>{try{const saved=localStorage.getItem("aeronaut-map");return MAP_THEMES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
 let weatherMode = (()=>{try{const saved=localStorage.getItem("aeronaut-weather");return WEATHER_PRESETS[saved]?saved:"clear";}catch{return "clear";}})();
 let selectedMissionId = (()=>{try{const saved=localStorage.getItem("aeronaut-mission");return MISSION_PROFILES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
-const realEarth={
-  enabled:(()=>{try{return localStorage.getItem("aeronaut-real-earth")!=="false";}catch{return true;}})()
-};
 // 이전 Google 버전에서 브라우저에 저장했을 수 있는 키도 업그레이드 즉시 삭제합니다.
-try{localStorage.removeItem("aeronaut-google-map-key");}catch{}
+try{localStorage.removeItem("aeronaut-google-map-key");localStorage.removeItem("aeronaut-real-earth");}catch{}
 const terrainTextures={};
 function terrainTexture(map) {
   if(terrainTextures[map])return terrainTextures[map];
   const image=new Image();image.decoding="async";image.src=TERRAIN_TEXTURE_URLS[map];
   terrainTextures[map]=image;return image;
 }
-const sceneryImages={};
-function sceneryImage(map) {
-  if(sceneryImages[map])return sceneryImages[map];
-  const image=new Image();image.decoding="async";image.src=REAL_SCENERY_URLS[map];
-  image.addEventListener("load",()=>{if(map===worldMap&&realEarth.enabled)setEarthStatus(`준비됨 · ${MAP_THEMES[map].label} 전방 풍경`,"active");},{once:true});
-  image.addEventListener("error",()=>{if(map===worldMap)setEarthStatus("배경 이미지를 읽지 못했습니다. 기본 Canvas 배경을 표시합니다.","error");},{once:true});
-  sceneryImages[map]=image;return image;
-}
-Object.keys(REAL_SCENERY_URLS).forEach(sceneryImage);
 // 기준 위치는 현재 카메라 연결 동안만 유지합니다. 이미지나 랜드마크는 저장하지 않습니다.
 const calibration = { active: false, neutral: null, palmScale: null, palmShape: null, started: 0, held: 0, lastSample: 0, reference: null, referenceScale: null, sumScale: 0, sumShape: 0, sumX: 0, sumY: 0, count: 0, note: "이지 조종은 손을 보여주면 자동으로 시작합니다. C 키는 표시 중심을 맞출 때만 사용합니다." };
 
@@ -152,29 +132,6 @@ const radians = (degrees) => degrees * Math.PI / 180;
 const degrees = (radiansValue) => radiansValue * 180 / Math.PI;
 const signed = (v, digits = 1) => `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
 const angleDifference = (a, b) => ((a - b + 540) % 360) - 180;
-
-function setEarthStatus(message,type="") {
-  const status=$("earth-status");status.textContent=message;status.className=`earth-status${type?` ${type}`:""}`;
-}
-
-function enableRealEarth(notify=true) {
-  realEarth.enabled=true;
-  try{localStorage.removeItem("aeronaut-google-map-key");localStorage.setItem("aeronaut-real-earth","true");}catch{}
-  $("earth-button").textContent="사실적 배경 ON";$("earth-button").setAttribute("aria-pressed","true");
-  $("render-mode-label").textContent="PHOTOREAL SCENERY";
-  const image=sceneryImage(worldMap);
-  setEarthStatus(image.complete&&image.naturalWidth?`준비됨 · ${MAP_THEMES[worldMap].label} 전방 풍경`:"사실적 배경 이미지를 준비하는 중입니다…","active");
-  if(notify){setEarthPanel(false,false);showMessage(`${MAP_THEMES[worldMap].label} 사실적 전방 풍경을 적용했습니다.`,false,4200);}
-}
-
-function disableRealEarth(notify=true) {
-  realEarth.enabled=false;
-  try{localStorage.setItem("aeronaut-real-earth","false");}catch{}
-  $("earth-button").textContent="사실적 배경 OFF";$("earth-button").setAttribute("aria-pressed","false");
-  $("render-mode-label").textContent="CANVAS SIMULATOR";
-  setEarthStatus("기본 Canvas 배경을 사용 중입니다.");
-  if(notify){setEarthPanel(false,false);showMessage("기본 Canvas 배경으로 전환했습니다.",false,3500);}
-}
 
 // 외부 음원 파일 없이 Web Audio 노드만 사용합니다. 브라우저 정책상 첫 사용자 입력 뒤에 시작됩니다.
 function ensureAudio() {
@@ -1129,7 +1086,6 @@ function path(points, fill, stroke) {
 function drawWorld(now) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
-  if(realEarth.enabled){drawRealEarthCanvas(now);return;}
   ctx.save();
   ctx.translate(width / 2, height * 0.46);
   // 오른쪽으로 기울이면 외부 수평선은 반시계 방향으로 회전합니다.
@@ -1154,6 +1110,7 @@ function drawWorld(now) {
 
   drawCloudField(theme,now,weather);
   drawTerrainImage(theme,extent);
+  drawTerrainRelief(theme);
   if(terrainReady) drawWorldDetailOverlay(theme);
   drawRegionalGround(theme);
   drawTerrainTexture(theme);
@@ -1178,6 +1135,7 @@ function drawWorld(now) {
   if(!terrainReady) {
     if(worldMap==="ocean-islands") drawOceanScenery(); else drawCityScenery(theme);
   }
+  drawTerrainAtmosphere(theme);
   if (lesson.mode !== "free") drawRunway();
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointRings();
   // 먼 수평선: 기울기와 피치 방향을 쉽게 읽을 수 있는 얇은 빛.
@@ -1189,50 +1147,6 @@ function drawWorld(now) {
   drawWindStreaks(now);
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointNavigator();
   if (lesson.mode === "mission") drawGatePassEffect(now);
-}
-
-// 전방 파노라마를 수평선 좌표계에 놓아 Roll, Pitch, 방향 변화가 풍경 전체에 적용되게 합니다.
-function drawRealEarthCanvas(now) {
-  const image=sceneryImage(worldMap);
-  if(!image.complete||!image.naturalWidth){realEarth.enabled=false;drawWorld(now);realEarth.enabled=true;return;}
-  const theme=MAP_THEMES[worldMap],weather=WEATHER_PRESETS[weatherMode];
-  const extent=Math.hypot(width,height)*1.3;
-  ctx.save();
-  ctx.translate(width/2,height*.46);
-  ctx.rotate(-radians(flight.roll));
-  ctx.translate(0,flight.pitch*height*.012);
-
-  // 이미지의 위쪽 약 30%에 있는 자연 수평선을 Canvas 원점과 맞춥니다.
-  // 넓은 이미지를 좌우로 반복하고 홀수 타일을 반전해 방향을 끝없이 바꿔도 빈 공간이 생기지 않습니다.
-  const imageAspect=image.naturalWidth/image.naturalHeight;
-  const drawHeight=Math.max(height*1.72,extent*.82);
-  const drawWidth=drawHeight*imageAspect;
-  const headingPhase=((((flight.heading-RUNWAY.heading)/360)+(lesson.x*.000018))%1+1)%1;
-  const travelSway=Math.sin((lesson.z+flight.distance*900)*.00055)*drawWidth*.012;
-  const offset=(headingPhase+.5)*drawWidth+travelSway;
-  const top=-drawHeight*.29;
-  for(let tile=-2;tile<=2;tile++) {
-    const x=tile*drawWidth-offset-1;
-    ctx.save();ctx.translate(x,top);
-    if(Math.abs(tile)%2===1){ctx.translate(drawWidth+2,0);ctx.scale(-1,1);}
-    ctx.drawImage(image,0,0,drawWidth+2,drawHeight);ctx.restore();
-  }
-
-  // 조종석 유리의 약한 색과 원근 안개만 더해 사진과 HUD의 명암을 맞춥니다.
-  const glass=ctx.createLinearGradient(0,-height*.5,0,height*.7);
-  glass.addColorStop(0,theme.night?"rgba(1,7,17,.24)":"rgba(7,27,34,.04)");
-  glass.addColorStop(.55,theme.night?"rgba(2,10,20,.18)":"rgba(8,31,31,.08)");
-  glass.addColorStop(1,"rgba(2,14,16,.24)");
-  ctx.fillStyle=glass;ctx.fillRect(-extent,-extent,extent*2,extent*2);
-  if(lesson.mode!=="free")drawRunway();
-  if(lesson.mode==="mission"&&!mission.returning)drawCheckpointRings();
-  drawPitchLadder();
-  ctx.restore();
-  drawMapColorGrade(theme);
-  drawWeatherEffects(now,weather);
-  drawWindStreaks(now);
-  if(lesson.mode==="mission"&&!mission.returning)drawCheckpointNavigator();
-  if(lesson.mode==="mission")drawGatePassEffect(now);
 }
 
 // 여러 개의 반투명 타원과 음영을 겹쳐 납작한 구름 대신 부피 있는 구름층을 만듭니다.
@@ -1339,31 +1253,37 @@ function drawTerrainImage(theme,extent) {
   // 선택한 맵만 내려받아 첫 접속에서 네 장의 큰 이미지를 동시에 요청하지 않습니다.
   const image=terrainTexture(worldMap);
   if(!image||!image.complete||!image.naturalWidth)return;
-  const slices=28,sourceHeight=image.naturalHeight/slices;
+  const slices=44,sourceHeight=image.naturalHeight/slices;
   // 별도 애니메이션 값을 섞지 않고 실제 월드 위치에만 고정합니다. 전진하면 지형 특징이 조종석 방향으로 이동합니다.
   const forward=((-lesson.z*.16)%image.naturalHeight+image.naturalHeight)%image.naturalHeight;
   const lateral=((lesson.x*.13)%image.naturalWidth+image.naturalWidth)%image.naturalWidth;
   const horizontalPhase=lateral/image.naturalWidth;
   ctx.save();
   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
-  const baseAlpha=worldMap==="night-city"?.72:worldMap==="ocean-islands"?.76:.70;
+  const baseAlpha=worldMap==="night-city"?.68:worldMap==="ocean-islands"?.72:.64;
   ctx.filter=theme.night?"contrast(1.16) brightness(.86) saturate(.86)":"contrast(1.12) saturate(.94)";
   ctx.globalCompositeOperation="source-over";
   for(let index=0;index<slices;index++) {
     const near=index/slices,far=(index+1)/slices;
     const yNear=near*near*height*1.85,yFar=far*far*height*1.85+1;
-    const nearHalf=width*(.08+near*.88),farHalf=width*(.08+far*.88);
+    // 지면은 시야 전체에 이어져야 하므로 중앙의 삼각형 영역으로 자르지 않습니다.
+    // 세로 띠의 비선형 높이만으로 거리감을 만들고, 월드 지표와 도로가 소실점을 보여줍니다.
+    const nearHalf=extent,farHalf=extent;
     const sourceY=(forward+index*sourceHeight)%image.naturalHeight;
-    const safeHeight=Math.min(sourceHeight+2,image.naturalHeight-sourceY);
-    if(safeHeight<=0)continue;
+    const sampleHeight=sourceHeight+1.5;
+    const firstHeight=Math.min(sampleHeight,image.naturalHeight-sourceY);
     ctx.save();
     // 멀리 있는 지표는 대기 산란으로 색과 명암이 약해지고 가까운 지표만 선명하게 보입니다.
     ctx.globalAlpha=baseAlpha*(.12+far*.88);
     ctx.beginPath();ctx.moveTo(-nearHalf,yNear);ctx.lineTo(nearHalf,yNear);
     ctx.lineTo(farHalf,yFar);ctx.lineTo(-farHalf,yFar);ctx.closePath();ctx.clip();
-    const stripWidth=farHalf*2,shift=horizontalPhase*stripWidth;
+    const stripWidth=farHalf*2,shift=horizontalPhase*stripWidth,destinationHeight=yFar-yNear+2;
     for(let tile=-1;tile<=1;tile++) {
-      ctx.drawImage(image,0,sourceY,image.naturalWidth,safeHeight,-farHalf-shift+tile*stripWidth,yNear,stripWidth,yFar-yNear+2);
+      const destinationX=-farHalf-shift+tile*stripWidth;
+      const firstDestinationHeight=destinationHeight*(firstHeight/sampleHeight);
+      ctx.drawImage(image,0,sourceY,image.naturalWidth,firstHeight,destinationX,yNear,stripWidth,firstDestinationHeight);
+      const remainder=sampleHeight-firstHeight;
+      if(remainder>.1)ctx.drawImage(image,0,0,image.naturalWidth,remainder,destinationX,yNear+firstDestinationHeight,stripWidth,destinationHeight-firstDestinationHeight);
     }
     ctx.restore();
   }
@@ -1373,6 +1293,66 @@ function drawTerrainImage(theme,extent) {
   ctx.globalCompositeOperation="source-over";ctx.globalAlpha=1;ctx.fillStyle=shade;
   ctx.fillRect(-extent,0,extent*2,height*1.4);
   ctx.restore();
+}
+
+// 넓은 지형 띠를 월드 좌표에 고정해 텍스처 위에 실제 지세처럼 보이는 높낮이와 방향성을 만듭니다.
+function drawTerrainRelief(theme) {
+  const baseZ=Math.floor(lesson.z/1100)*1100;
+  const altitudeAlpha=clamp(1-flight.altitude/7600,.16,.72);
+  const colors=worldMap==="ocean-islands"
+    ?["#86d5cf18","#073d591c","#d7eee414"]
+    :theme.desert?["#5b3b2925","#e1b57718","#8e634425"]
+      :theme.night?["#07151d38","#31534b1c","#101f2830"]
+        :["#183d3329","#96a76c18","#2b51402b"];
+  ctx.save();ctx.globalAlpha=altitudeAlpha;
+  for(let row=-3;row<=7;row++) {
+    const seed=(baseZ/1100+row)*6.73;
+    const centerZ=baseZ+row*1100+sceneryNoise(seed)*260;
+    const thickness=55+sceneryNoise(seed+4.8)*150;
+    const upper=[],lower=[];
+    for(let point=0;point<=12;point++) {
+      const x=-1900+point*(3800/12);
+      const bend=Math.sin(point*.82+seed)*95+Math.sin(point*1.91+seed*.37)*38;
+      upper.push([x,centerZ+bend-thickness*.5]);
+      lower.unshift([x,centerZ+bend+thickness*.5]);
+    }
+    drawGroundPolygon(upper.concat(lower),colors[(row+30)%colors.length]);
+    drawGroundPolyline(upper,theme.desert?"#f0c68b1d":worldMap==="ocean-islands"?"#c9f4ed20":theme.night?"#8bb6a814":"#cbd5a41b",.75);
+  }
+
+  // 지면 위 작은 패치는 가까운 곳에서만 보이게 해 축척을 전달하되 격자처럼 반복되지 않게 합니다.
+  if(worldMap!=="ocean-islands") {
+    for(let row=-2;row<=8;row++) for(let item=0;item<3;item++) {
+      const seed=(baseZ/700+row)*11.3+item*4.7;
+      const z=baseZ+row*700+sceneryNoise(seed)*310;
+      const x=(sceneryNoise(seed+2.1)-.5)*2800;
+      const rx=45+sceneryNoise(seed+5.8)*180,rz=20+sceneryNoise(seed+9.2)*65;
+      drawGroundEllipse(x,z,rx,rz,colors[(row+item+30)%colors.length]);
+    }
+  }
+  ctx.restore();
+}
+
+function drawGroundPolyline(worldPoints,color,lineWidth=1) {
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  let drawing=false;
+  ctx.save();ctx.strokeStyle=color;ctx.lineWidth=lineWidth;ctx.lineCap="round";ctx.beginPath();
+  for(const [worldX,worldZ] of worldPoints) {
+    const camera=runwayCameraPoint(worldX,worldZ);
+    if(camera.z<RUNWAY_NEAR_CLIP){drawing=false;continue;}
+    const x=camera.x*focal/camera.z,y=eyeHeight*focal/camera.z;
+    if(drawing)ctx.lineTo(x,y);else{ctx.moveTo(x,y);drawing=true;}
+  }
+  ctx.stroke();ctx.restore();
+}
+
+// 수평선 가까이 있는 지형의 대비를 낮춰 먼 지면과 가까운 지면이 한 평면처럼 붙어 보이지 않게 합니다.
+function drawTerrainAtmosphere(theme) {
+  const extent=Math.hypot(width,height)*2;
+  const haze=ctx.createLinearGradient(0,-8,0,height*.55);
+  const horizonColor=theme.night?"rgba(56,82,88,.24)":theme.desert?"rgba(224,194,151,.22)":"rgba(205,222,207,.20)";
+  haze.addColorStop(0,horizonColor);haze.addColorStop(.24,theme.night?"rgba(25,46,52,.10)":"rgba(186,207,194,.07)");haze.addColorStop(1,"rgba(8,18,22,0)");
+  ctx.save();ctx.fillStyle=haze;ctx.fillRect(-extent,-8,extent*2,height*.56);ctx.restore();
 }
 
 // 고해상도 텍스처 위에는 면을 덮는 도형 대신 월드 좌표에 고정된 작은 지표만 합성합니다.
@@ -1402,7 +1382,7 @@ function drawWorldDetailOverlay(theme) {
       }
     }
     // 가까이 내려오면 활주로에서 충분히 떨어진 낮은 구조물만 더해 거대한 상자형 스카이라인을 피합니다.
-    if(flight.altitude<950) drawLowAltitudeStructures(theme,baseZ);
+    if(flight.altitude<1800) drawLowAltitudeStructures(theme,baseZ);
   } else if(worldMap==="desert-base") {
     const track="#6c533c52",edge="#e0b87c1e";
     for(let lane=-3;lane<=3;lane++) {
@@ -1415,7 +1395,7 @@ function drawWorldDetailOverlay(theme) {
       const z=baseZ+row*1080+sceneryNoise(row*5.7)*130;
       runwayRectangle(-1250,z,-180,z+4,track);runwayRectangle(180,z,1250,z+4,track);
     }
-    if(flight.altitude<900) drawDesertBaseDetails(baseZ);
+    if(flight.altitude<1500) drawDesertBaseDetails(baseZ);
   } else if(worldMap==="ocean-islands") {
     // 고정된 잔물결과 작은 백파만 더해 수면의 축척을 보여주고 인공 섬 도형은 만들지 않습니다.
     for(let row=-5;row<=8;row++) {
@@ -1444,7 +1424,7 @@ function drawLowAltitudeStructures(theme,baseZ) {
     });
   }
   structures.sort((a,b)=>b.camera.z-a.camera.z);
-  const opacity=clamp(1-flight.altitude/950,.12,.58);
+  const opacity=clamp(1-flight.altitude/1750,.08,.58);
   structures.forEach(building=>drawCityBuilding(building,theme,opacity));
 }
 
@@ -1614,12 +1594,22 @@ function drawMountainRanges(extent,theme) {
     mountain.push([extent,10]);
     const fill=layer===0?theme.mountain[0]:layer===1?theme.mountain[1]:(theme.night?"#0b181dcc":theme.desert?"#704b3daa":"#304c49b8");
     path(mountain,fill);
+    // 짧은 사면 결을 능선 아래로 흘려 평평한 실루엣을 깨되 큰 반투명 면은 만들지 않습니다.
+    ctx.lineWidth=.8;ctx.strokeStyle=theme.night?"#829ca014":theme.desert?"#f0bf821d":"#d8e1c21a";
+    for(let index=1;index<ridge.length-1;index+=3) {
+      const [x,y]=ridge[index],direction=index%2?-1:1;
+      ctx.beginPath();ctx.moveTo(x,y+2);ctx.lineTo(x+direction*step*.52,y+12+layer*4);ctx.stroke();
+    }
     ctx.strokeStyle=theme.night?"#6a8a8a18":theme.desert?"#e0a97932":"#c7d8bf35";ctx.lineWidth=1;ctx.beginPath();
     ridge.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.stroke();
     // 산악 도시의 먼 높은 봉우리에는 얇은 설선을 표시합니다.
     if(worldMap==="mountain-city"&&layer===0) {
-      ctx.strokeStyle="#dce7dc55";ctx.lineWidth=2;ctx.beginPath();
-      ridge.forEach(([x,y],i)=>i?ctx.lineTo(x,y+Math.min(9,(Math.abs(Math.sin((x+offset)*.008))*8))):ctx.moveTo(x,y+5));ctx.stroke();
+      ctx.fillStyle="#e8eee0a0";
+      for(let index=1;index<ridge.length-1;index++) {
+        const [x,y]=ridge[index];if(y>-70)continue;
+        const cap=clamp((-y-56)*.32,5,15);
+        path([[x,y],[x-step*.48,y+cap],[x-step*.12,y+cap*.7],[x+step*.12,y+cap*1.05],[x+step*.48,y+cap]],"#e7eee08c");
+      }
     }
   }
 }
@@ -2408,26 +2398,14 @@ function animate(now) {
 function setMapPanel(open) {
   if(open) setWeatherPanel(false,false);
   if(open) setMissionPanel(false,false);
-  if(open) setEarthPanel(false,false);
   $("map-panel").hidden=!open;
   $("map-button").setAttribute("aria-expanded",String(open));
   if(open) $("map-panel").querySelector(`[data-map="${worldMap}"]`)?.focus();
   else $("map-button").focus({preventScroll:true});
 }
 
-function setEarthPanel(open,restoreFocus=true) {
-  if(open) {
-    setWeatherPanel(false,false);setMissionPanel(false,false);
-    if(!$('map-panel').hidden){$('map-panel').hidden=true;$('map-button').setAttribute('aria-expanded','false');}
-    if(realEarth.enabled)setEarthStatus(`준비됨 · ${MAP_THEMES[worldMap].label} 전방 풍경`,"active");
-  }
-  $("earth-panel").hidden=!open;$("earth-button").setAttribute("aria-expanded",String(open));
-  if(open)$(realEarth.enabled?"earth-disable-button":"earth-enable-button").focus();else if(restoreFocus)$("earth-button").focus({preventScroll:true});
-}
-
 function setWeatherPanel(open,restoreFocus=true) {
   if(open) setMissionPanel(false,false);
-  if(open) setEarthPanel(false,false);
   if(open&&$("map-panel")&&!$("map-panel").hidden) {
     $("map-panel").hidden=true;$("map-button").setAttribute("aria-expanded","false");
   }
@@ -2457,7 +2435,6 @@ function setMissionPanel(open,restoreFocus=true) {
   if(open) {
     if(!$("map-panel").hidden){$("map-panel").hidden=true;$("map-button").setAttribute("aria-expanded","false");}
     if(!$("weather-panel").hidden){$("weather-panel").hidden=true;$("weather-button").setAttribute("aria-expanded","false");}
-    if(!$("earth-panel").hidden){$("earth-panel").hidden=true;$("earth-button").setAttribute("aria-expanded","false");}
     selectMissionCard(selectedMissionId);
     refreshMissionBests();
   }
@@ -2496,7 +2473,6 @@ function selectWorldMap(map,notify=true) {
   $("flight").dataset.map=map;
   $("map-button").textContent=`맵 · ${MAP_THEMES[map].label}`;
   document.querySelectorAll("[data-map]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.map===map)));
-  if(realEarth.enabled)setEarthStatus(`준비됨 · ${MAP_THEMES[map].label} 전방 풍경`,"active");
   if(notify) {
     setMapPanel(false);
     showMessage(`${MAP_THEMES[map].label} 맵으로 변경했습니다.`,false,3500);
@@ -2541,16 +2517,11 @@ $("audio-button").addEventListener("click",() => setSoundMuted(!sound.muted));
 $("map-button").addEventListener("click",()=>setMapPanel($("map-panel").hidden));
 $("map-close-button").addEventListener("click",()=>setMapPanel(false));
 document.querySelectorAll("[data-map]").forEach(button=>button.addEventListener("click",()=>selectWorldMap(button.dataset.map)));
-$("earth-button").addEventListener("click",()=>setEarthPanel($("earth-panel").hidden));
-$("earth-close-button").addEventListener("click",()=>setEarthPanel(false));
-$("earth-enable-button").addEventListener("click",enableRealEarth);
-$("earth-disable-button").addEventListener("click",()=>disableRealEarth());
 $("weather-button").addEventListener("click",()=>setWeatherPanel($("weather-panel").hidden));
 $("weather-close-button").addEventListener("click",()=>setWeatherPanel(false));
 document.querySelectorAll("[data-weather]").forEach(button=>button.addEventListener("click",()=>selectWeather(button.dataset.weather)));
 document.addEventListener("pointerdown",ensureAudio,{once:true});
 document.addEventListener("keydown", event => {
-  if(event.code==="Escape"&&!$("earth-panel").hidden){event.preventDefault();setEarthPanel(false);return;}
   if(event.code==="Escape"&&!$("map-panel").hidden){event.preventDefault();setMapPanel(false);return;}
   if(event.code==="Escape"&&!$("weather-panel").hidden){event.preventDefault();setWeatherPanel(false);return;}
   if(event.code==="Escape"&&!$("mission-panel").hidden){event.preventDefault();setMissionPanel(false);return;}
@@ -2596,7 +2567,6 @@ document.addEventListener("visibilitychange",() => {
 window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
 new ResizeObserver(resizeCanvas).observe(canvas);
 selectWorldMap(worldMap,false);selectWeather(weatherMode,false);selectMissionCard(selectedMissionId);refreshMissionBests();resizeCanvas();updateHud();requestAnimationFrame(animate);
-if(realEarth.enabled)enableRealEarth(false);else disableRealEarth(false);
 if (window.location.protocol === "file:") {
   $("local-server-link").hidden = false;
   showMessage("파일을 직접 열었습니다. 아래 버튼으로 로컬 서버에서 열거나 VS Code Live Server를 사용해주세요.", true);

@@ -20,14 +20,3 @@
 @media(max-width:700px){.topbar{height:72px;padding:0 14px}.brand{font-size:15px;gap:5px;letter-spacing:2px}.brand-mark{font-size:29px}.brand small{font-size:8px;letter-spacing:1px}button{font-size:11px;padding:9px}.primary span{margin-left:5px}.actions{gap:5px}.flight{height:650px}.mission{top:24px;left:16px}.mission>span{font-size:9px}.mission strong{font-size:13px}.mission small{font-size:10px}.heading{top:140px;gap:18px}.camera-panel{width:144px;top:16px;right:12px}.panel-title{font-size:9px;padding:8px}.swap-label{font-size:9px;padding:6px;gap:3px}.swap-label input{width:11px;height:11px}#camera-placeholder{font-size:10px}#camera-placeholder small{display:none}#camera-placeholder span{font-size:24px}.message{top:29%;width:80%;font-size:11px}.throttle-panel{left:12px;top:54%;width:85px}.throttle-body{height:125px;padding:0 9px;gap:8px}.throttle-caption{font-size:8px}.throttle-panel .panel-title{font-size:8px;padding:9px 5px}.throttle-panel p{font-size:8px;padding:0 5px}.readout{top:39%;width:95px}.speed{left:16px}.altitude{right:16px}.readout>strong{font-size:34px}.readout>span{font-size:10px}.readout>small{font-size:8px}.attitude{gap:18px;top:63%;white-space:nowrap;font-size:10px}.cockpit-label{bottom:20px;font-size:9px;letter-spacing:1px}.cockpit-label.left{left:12px}.cockpit-label.right{right:12px}.cockpit-label span{font-size:7px}.stick-hint{font-size:9px;top:90%}.statusbar{padding:14px;gap:12px;font-size:9px}.instructions{grid-template-columns:1fr;padding:20px;gap:14px}.instructions p{font-size:12px}}
 #flight-canvas{z-index:1;pointer-events:none}
 .flight>:not(#flight-canvas){z-index:2}
-.earth-panel{width:min(560px,calc(100% - 32px));z-index:8!important}
-.earth-panel>p{margin:0 0 16px;color:#c4d2d3;font-size:12px;line-height:1.7}
-.earth-panel>label{display:block;margin-bottom:7px;color:#aebfc1;font-size:11px}
-.earth-key-row{display:grid;grid-template-columns:1fr auto;gap:8px}
-.earth-key-row input{min-width:0;padding:11px 12px;border:1px solid #48636b;border-radius:5px;background:#07131b;color:#dff0e9;font:12px Consolas,monospace}
-.earth-panel>small{display:block;margin-top:9px;color:#849ba0;font-size:10px;line-height:1.55}
-.earth-panel b{color:#b7d8c8;font-weight:500}
-.earth-status{margin-top:14px;padding:10px 12px;border:1px solid #3d555d;background:#0a1922;color:#a9c0c2;font-size:11px;line-height:1.55}
-.earth-status.active{border-color:#8bc887;color:#bcf7b0}.earth-status.error{border-color:#a76d55;color:#ffd0af}
-.earth-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:15px}
-@media(max-width:700px){.earth-actions{flex-direction:column}.earth-actions button{width:100%}}

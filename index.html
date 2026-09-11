@@ -6,13 +6,13 @@
   <meta name="theme-color" content="#080f16">
   <meta name="description" content="양손 제스처로 조종하는 Canvas 1인칭 비행 시뮬레이터">
   <title>AERONAUT — Hand Flight Simulator</title>
-  <link rel="stylesheet" href="style.css?v=20260912-2">
+  <link rel="stylesheet" href="style.css?v=20260912-3">
 </head>
 <body>
   <main class="app">
     <header class="topbar">
       <div class="brand"><span class="brand-mark">⌁</span><div>AERONAUT <small>HAND FLIGHT / 01</small></div></div>
-      <div class="flight-label"><span class="dot"></span><span id="header-mode">FREE FLIGHT</span><span class="divider">/</span><span id="render-mode-label">CANVAS SIMULATOR</span></div>
+      <div class="flight-label"><span class="dot"></span><span id="header-mode">FREE FLIGHT</span><span class="divider">/</span><span id="render-mode-label">ENHANCED CANVAS</span></div>
       <div class="actions">
         <button id="reset-button" class="quiet">비행 초기화</button>
         <button id="camera-button" class="primary">웹캠 연결 <span>↗</span></button>
@@ -21,7 +21,7 @@
 
     <nav class="training-bar" aria-label="비행 모드">
       <div class="training-modes"><button id="free-flight-button" class="quiet" aria-pressed="true">자유 비행</button><button id="takeoff-button" class="quiet" aria-pressed="false">지상 출발</button><button id="approach-button" class="quiet" aria-pressed="false">착륙 연습</button><button id="mission-button" class="quiet" aria-pressed="false" aria-expanded="false" aria-controls="mission-panel">통합 미션</button></div>
-      <div class="training-controls"><span id="mode-label">FREE FLIGHT</span><button id="map-button" class="quiet" aria-expanded="false" aria-controls="map-panel">맵 · 산악 도시</button><button id="earth-button" class="quiet" aria-expanded="false" aria-controls="earth-panel" aria-pressed="true">사실적 배경 ON</button><button id="weather-button" class="quiet" aria-expanded="false" aria-controls="weather-panel">날씨 · 맑음</button><button id="audio-button" class="quiet" aria-pressed="true">사운드 ON</button><button id="pause-button" class="quiet">일시정지</button><button id="brake-button" class="quiet" aria-pressed="false" disabled>브레이크 OFF</button></div>
+      <div class="training-controls"><span id="mode-label">FREE FLIGHT</span><button id="map-button" class="quiet" aria-expanded="false" aria-controls="map-panel">맵 · 산악 도시</button><button id="weather-button" class="quiet" aria-expanded="false" aria-controls="weather-panel">날씨 · 맑음</button><button id="audio-button" class="quiet" aria-pressed="true">사운드 ON</button><button id="pause-button" class="quiet">일시정지</button><button id="brake-button" class="quiet" aria-pressed="false" disabled>브레이크 OFF</button></div>
     </nav>
     <section id="flight" class="flight" aria-label="1인칭 비행 시뮬레이터">
       <canvas id="flight-canvas" aria-label="하늘, 지면과 조종석이 표시되는 비행 화면"></canvas>
@@ -44,13 +44,6 @@
           <button data-map="desert-base" aria-pressed="false"><i class="map-preview desert-base"></i><strong>사막 기지</strong><small>협곡 · 격납고 · 기지</small></button>
           <button data-map="night-city" aria-pressed="false"><i class="map-preview night-city"></i><strong>야간 도시</strong><small>별빛 · 빌딩 · 도로등</small></button>
         </div>
-      </section>
-      <section id="earth-panel" class="map-panel earth-panel" aria-labelledby="earth-title" hidden>
-        <header><div><span>PHOTOREAL SCENERY</span><h2 id="earth-title">사실적인 전방 비행 풍경</h2></div><button id="earth-close-button" class="quiet" aria-label="사실적 배경 설정 닫기">×</button></header>
-        <p>지도처럼 위에서 내려다보는 화면 대신, 조종석 앞에서 산·도시·바다·활주로를 바라보는 파노라마 풍경을 표시합니다.</p>
-        <small>이미지가 앱에 포함되어 있어 가입, 결제, API 키가 필요 없습니다. Pitch와 Roll, 기수 방향에 맞춰 풍경이 함께 움직입니다.</small>
-        <div id="earth-status" class="earth-status active" role="status">사실적 전방 배경을 사용 중입니다.</div>
-        <div class="earth-actions"><button id="earth-disable-button" class="quiet" type="button">기본 Canvas 배경</button><button id="earth-enable-button" class="primary" type="button">사실적 배경 사용</button></div>
       </section>
       <section id="weather-panel" class="map-panel weather-panel" aria-labelledby="weather-title" hidden>
         <header><div><span>ATMOSPHERE CONTROL</span><h2 id="weather-title">비행 날씨 선택</h2></div><button id="weather-close-button" class="quiet" aria-label="날씨 선택 닫기">×</button></header>
@@ -136,6 +129,6 @@
   </main>
   <!-- 일반 스크립트로 시작해야 파일을 직접 열어도 실행 방법을 안내할 수 있습니다.
        MediaPipe는 main.js 내부에서 필요한 시점에 동적 import합니다. -->
-  <script defer src="main.js?v=20260912-2"></script>
+  <script defer src="main.js?v=20260912-3"></script>
 </body>
 </html>
