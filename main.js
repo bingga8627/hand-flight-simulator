@@ -65,6 +65,13 @@ const MAP_THEMES = {
   "desert-base": {label:"사막 기지",sky:["#244e67","#7798a0","#e6c692"],ground:["#ad895d","#8a613f","#513a2b"],mountain:["#7a4e3d88","#a36b4899"],grid:"226,190,126",road:"#59483caa",crossRoad:"#665044aa",buildings:["#806955","#6d5b4b","#584b40"],roof:"#aa9270",side:"#493e35bb",window:"#f1c66f",cloud:"239,221,188",desert:true},
   "night-city": {label:"야간 도시",sky:["#020712","#102337","#294252"],ground:["#13252b","#0b1d22","#040d12"],mountain:["#0b172566","#172b3299"],grid:"81,142,133",road:"#142b32cc",crossRoad:"#18323acc",buildings:["#1a3440","#142a37","#0d222e"],roof:"#34515a",side:"#081722dd",window:"#d7ef8b",cloud:"111,139,151",night:true}
 };
+const WEATHER_PRESETS = {
+  clear:{label:"맑음",clouds:1,haze:0,wind:.08},
+  sunset:{label:"석양",clouds:1.25,haze:.08,wind:.12,sky:["#162844","#a64f50","#f2a561"],sunset:true},
+  overcast:{label:"흐림",clouds:2.25,haze:.18,wind:.24,sky:["#263844","#5d7075","#929d98"],overcast:true},
+  rain:{label:"비",clouds:2.6,haze:.24,wind:.48,sky:["#132738","#405863","#75847f"],rain:1,overcast:true},
+  fog:{label:"안개",clouds:.7,haze:.62,wind:.06,sky:["#61777d","#9caaa7","#c5cbc5"],fog:true}
+};
 const KNOTS_TO_MPS = 0.514444;
 const FEET_TO_METERS = 0.3048;
 const RUNWAY_NEAR_CLIP = 3;
@@ -92,6 +99,7 @@ let lastVideoTime = -1, lastInference = 0, lastFrame = 0, lastHud = 0;
 let inferenceFailures = 0, messageTimer = 0;
 let connectionStage = "idle";
 let worldMap = (()=>{try{const saved=localStorage.getItem("aeronaut-map");return MAP_THEMES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
+let weatherMode = (()=>{try{const saved=localStorage.getItem("aeronaut-weather");return WEATHER_PRESETS[saved]?saved:"clear";}catch{return "clear";}})();
 // 기준 위치는 현재 카메라 연결 동안만 유지합니다. 이미지나 랜드마크는 저장하지 않습니다.
 const calibration = { active: false, neutral: null, palmScale: null, palmShape: null, started: 0, held: 0, lastSample: 0, reference: null, referenceScale: null, sumScale: 0, sumShape: 0, sumX: 0, sumY: 0, count: 0, note: "이지 조종은 손을 보여주면 자동으로 시작합니다. C 키는 표시 중심을 맞출 때만 사용합니다." };
 
@@ -996,7 +1004,7 @@ function updateFlight(dt, now) {
   }
   // 일시정지 중에도 손 추적과 중심 설정은 계속합니다. 위치·자세만 고정합니다.
   if (lesson.paused || lesson.result || calibration.active) return;
-  if (lesson.mode !== "free") { updateRunwayFlight(dt); return; }
+  if (lesson.mode !== "free") { updateRunwayFlight(dt); applyWeatherFlight(dt,now); return; }
   // 양수 pitch는 기수 상승. 놓으면 초보자가 회복하기 쉬운 수평 자세로 복귀합니다.
   const response=controlResponse();
   const applied=appliedStickInput();
@@ -1011,6 +1019,17 @@ function updateFlight(dt, now) {
   const direction=radians(flight.heading-RUNWAY.heading),travel=flight.speed*KNOTS_TO_MPS*dt;
   lesson.x+=Math.sin(direction)*travel;lesson.z+=Math.cos(direction)*travel;
   flight.distance += flight.speed * dt * 0.0003;
+  applyWeatherFlight(dt,now);
+}
+
+// 악천후에서도 손 조종을 방해하지 않는 범위로 약한 돌풍만 물리에 반영합니다.
+function applyWeatherFlight(dt,now) {
+  const weather=WEATHER_PRESETS[weatherMode];
+  if(!weather||weather.wind<=0||lesson.phase!=="airborne")return;
+  const gust=Math.sin(now*.0017)+Math.sin(now*.0041+.8)*.45;
+  flight.heading=(flight.heading+gust*weather.wind*.7*dt+360)%360;
+  flight.roll=clamp(flight.roll+gust*weather.wind*1.8*dt,-MAX_ROLL,MAX_ROLL);
+  lesson.x+=Math.sin(now*.00041+1.2)*weather.wind*1.4*dt;
 }
 
 // 속도 경계에 서로 다른 진입/해제 값을 사용해 경고가 빠르게 깜빡이지 않게 합니다.
@@ -1051,19 +1070,21 @@ function drawWorld(now) {
   ctx.translate(0, flight.pitch * height * 0.012);
   const extent = Math.hypot(width, height) * 2;
   const theme=MAP_THEMES[worldMap];
+  const weather=WEATHER_PRESETS[weatherMode];
+  const skyColors=weather.sky||theme.sky;
   const sky = ctx.createLinearGradient(0, -height, 0, 20);
-  sky.addColorStop(0,theme.sky[0]);sky.addColorStop(.65,theme.sky[1]);sky.addColorStop(1,theme.sky[2]);
+  sky.addColorStop(0,skyColors[0]);sky.addColorStop(.65,skyColors[1]);sky.addColorStop(1,skyColors[2]);
   ctx.fillStyle = sky; ctx.fillRect(-extent, -extent, extent * 2, extent);
   const ground = ctx.createLinearGradient(0, 0, 0, height);
   ground.addColorStop(0,theme.ground[0]);ground.addColorStop(.18,theme.ground[1]);ground.addColorStop(1,theme.ground[2]);
   ctx.fillStyle = ground; ctx.fillRect(-extent, 0, extent * 2, extent);
 
-  drawSkyDetails(extent,theme,now);
-  if(theme.night) drawNightSky(extent);
+  drawSkyDetails(extent,theme,now,weather);
+  if(theme.night&&weatherMode==="clear") drawNightSky(extent);
   if(theme.mountain) drawMountainRanges(extent,theme);
   if(worldMap==="mountain-city"||worldMap==="night-city") drawDistantSkyline(extent,theme);
 
-  drawCloudField(theme,now);
+  drawCloudField(theme,now,weather);
 
   // 지면의 원근 격자와 패치가 전진감을 줍니다. 고도에 따라 격자 크기도 완만히 변합니다.
   const scale = clamp(2400 / (flight.altitude + 400), 0.35, 2);
@@ -1088,27 +1109,30 @@ function drawWorld(now) {
   drawPitchLadder();
   ctx.restore();
   drawMapColorGrade(theme);
+  drawWeatherEffects(now,weather);
   drawWindStreaks(now);
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointNavigator();
   if (lesson.mode === "mission") drawGatePassEffect(now);
 }
 
 // 여러 개의 반투명 타원과 음영을 겹쳐 납작한 구름 대신 부피 있는 구름층을 만듭니다.
-function drawCloudField(theme,now) {
+function drawCloudField(theme,now,weather) {
   const band=width*3.2;
   ctx.save();
-  for(let i=0;i<11;i++) {
+  const cloudCount=Math.min(18,Math.round(11*weather.clouds));
+  for(let i=0;i<cloudCount;i++) {
     const phase=((i*347+now*(.0014+(i%3)*.00035)+flight.heading*5.6)%band)-band/2;
     const y=-62-(i%4)*height*.145-sceneryNoise(i*4.8)*28;
     const size=20+(i%4)*9;
-    const alpha=(theme.night?.035:.075)+(i%3)*(theme.night?.013:.026);
+    const baseAlpha=weather.overcast?.16:theme.night?.035:.075;
+    const alpha=baseAlpha+(i%3)*(weather.overcast?.035:theme.night?.013:.026);
     const shadow=ctx.createRadialGradient(phase,y+size*.22,size*.1,phase,y,size*2.8);
     shadow.addColorStop(0,`rgba(${theme.cloud},${alpha*1.35})`);
     shadow.addColorStop(.55,`rgba(${theme.cloud},${alpha})`);
     shadow.addColorStop(1,`rgba(${theme.cloud},0)`);
     ctx.fillStyle=shadow;ctx.beginPath();ctx.ellipse(phase,y,size*3.6,size*.78,0,0,Math.PI*2);ctx.fill();
-    for(let puff=0;puff<5;puff++) {
-      const px=phase+(puff-2)*size*.72,py=y-size*(.08+sceneryNoise(i*7+puff)*.3);
+    for(let puff=0;puff<4;puff++) {
+      const px=phase+(puff-1.5)*size*.82,py=y-size*(.08+sceneryNoise(i*7+puff)*.3);
       const pr=size*(.72+sceneryNoise(i*13+puff)*.48);
       const glow=ctx.createRadialGradient(px-pr*.2,py-pr*.3,0,px,py,pr);
       glow.addColorStop(0,`rgba(${theme.cloud},${alpha*1.8})`);glow.addColorStop(1,`rgba(${theme.cloud},0)`);
@@ -1132,26 +1156,80 @@ function drawMapColorGrade(theme) {
   ctx.restore();
 }
 
+function drawWeatherEffects(now,weather) {
+  ctx.save();
+  if(weather.overcast) {
+    ctx.fillStyle=weather.rain?"#07172235":"#32444d20";ctx.fillRect(0,0,width,height);
+  }
+  if(weather.sunset) {
+    const glow=ctx.createRadialGradient(width*.76,height*.39,0,width*.76,height*.39,width*.42);
+    glow.addColorStop(0,"#ffb25b23");glow.addColorStop(.5,"#d76b4a12");glow.addColorStop(1,"#532f4b00");
+    ctx.fillStyle=glow;ctx.fillRect(0,0,width,height);
+  }
+  if(weather.haze>0) {
+    const horizon=height*.46+flight.pitch*height*.012;
+    const fog=ctx.createLinearGradient(0,horizon-height*.3,0,height);
+    fog.addColorStop(0,"#d6dfdc00");fog.addColorStop(.34,`rgba(199,211,208,${weather.haze*.7})`);
+    fog.addColorStop(1,`rgba(166,181,179,${weather.haze*(weather.fog?.92:.28)})`);
+    ctx.fillStyle=fog;ctx.fillRect(0,0,width,height);
+  }
+  if(weather.rain) {
+    const gust=Math.sin(now*.0017)*13;
+    ctx.lineWidth=1;ctx.lineCap="round";
+    for(let i=0;i<105;i++) {
+      const seed=sceneryNoise(i*9.17),speed=.42+sceneryNoise(i*4.31)*.72;
+      const x=(sceneryNoise(i*2.73)*width+now*speed*.18+gust*i*.03)%(width+100)-50;
+      const y=(sceneryNoise(i*7.51)*height+now*speed*.52)%(height+90)-45;
+      const length=10+speed*22;
+      ctx.strokeStyle=`rgba(205,230,235,${.12+speed*.25})`;
+      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-4-gust*.08,y+length);ctx.stroke();
+    }
+    // 유리 표면의 큰 물방울은 가장자리만 그려 HUD 판독성을 유지합니다.
+    ctx.strokeStyle="#d9edf136";ctx.lineWidth=1.1;
+    for(let i=0;i<14;i++) {
+      const phase=(now*.000045*(.7+i%4)+sceneryNoise(i)*1.3)%1;
+      const x=sceneryNoise(i*14.1)*width,y=(sceneryNoise(i*8.3)*height+phase*height*.28)%height;
+      const r=2+sceneryNoise(i*3.9)*5;
+      ctx.beginPath();ctx.arc(x,y,r,.15,Math.PI*1.55);ctx.stroke();
+    }
+    const flash=Math.pow(Math.max(0,Math.sin(now*.00023*7.3)-.992)*125,2);
+    if(flash>0) {ctx.fillStyle=`rgba(220,235,240,${Math.min(.22,flash*.08)})`;ctx.fillRect(0,0,width,height);}
+  }
+  if(weather.fog) {
+    // 서로 다른 속도의 안개 띠가 천천히 흘러 정적인 흰 막처럼 보이지 않게 합니다.
+    for(let i=0;i<5;i++) {
+      const x=((now*.004*(i+1)+i*311)%(width*1.7))-width*.35;
+      const y=height*(.28+i*.12),rx=width*(.25+i*.035);
+      const mist=ctx.createRadialGradient(x,y,0,x,y,rx);
+      mist.addColorStop(0,"#e0e7e351");mist.addColorStop(1,"#d9e1de00");
+      ctx.fillStyle=mist;ctx.beginPath();ctx.ellipse(x,y,rx,height*.13,0,0,Math.PI*2);ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
 function sceneryNoise(value) {
   const wave=Math.sin(value*12.9898+78.233)*43758.5453;
   return wave-Math.floor(wave);
 }
 
 // 태양·달·수평선 안개를 더해 각 맵의 시간대와 대기감을 분명하게 만듭니다.
-function drawSkyDetails(extent,theme,now) {
+function drawSkyDetails(extent,theme,now,weather) {
   ctx.save();
-  const night=theme.night;
-  const bodyX=night?width*.18:-width*.31;
-  const bodyY=night?-height*.31:-height*.28;
+  const night=theme.night&&weatherMode==="clear";
+  const bodyX=weather.sunset?-width*.16:night?width*.18:-width*.31;
+  const bodyY=weather.sunset?-height*.07:night?-height*.31:-height*.28;
   const radius=clamp(height*.055,24,54);
-  const glow=ctx.createRadialGradient(bodyX,bodyY,0,bodyX,bodyY,radius*3.3);
-  glow.addColorStop(0,night?"#e9f4e7e8":"#fff3b9f2");
-  glow.addColorStop(.2,night?"#c9dce98a":"#ffd9859a");
-  glow.addColorStop(1,"#ffffff00");
-  ctx.fillStyle=glow;ctx.beginPath();ctx.arc(bodyX,bodyY,radius*3.3,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=night?"#dce9e6":"#fff1b5";ctx.beginPath();ctx.arc(bodyX,bodyY,radius,0,Math.PI*2);ctx.fill();
-  if(night) {
-    ctx.fillStyle="#162b3a";ctx.beginPath();ctx.arc(bodyX+radius*.34,bodyY-radius*.18,radius*.94,0,Math.PI*2);ctx.fill();
+  if(!weather.overcast&&!weather.fog) {
+    const glow=ctx.createRadialGradient(bodyX,bodyY,0,bodyX,bodyY,radius*(weather.sunset?4.8:3.3));
+    glow.addColorStop(0,night?"#e9f4e7e8":weather.sunset?"#fff0b8fa":"#fff3b9f2");
+    glow.addColorStop(.2,night?"#c9dce98a":weather.sunset?"#ff9b558f":"#ffd9859a");
+    glow.addColorStop(1,"#ffffff00");
+    ctx.fillStyle=glow;ctx.beginPath();ctx.arc(bodyX,bodyY,radius*(weather.sunset?4.8:3.3),0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=night?"#dce9e6":weather.sunset?"#fff1bd":"#fff1b5";ctx.beginPath();ctx.arc(bodyX,bodyY,radius,0,Math.PI*2);ctx.fill();
+    if(night) {
+      ctx.fillStyle="#162b3a";ctx.beginPath();ctx.arc(bodyX+radius*.34,bodyY-radius*.18,radius*.94,0,Math.PI*2);ctx.fill();
+    }
   }
   const haze=ctx.createLinearGradient(0,-height*.18,0,height*.14);
   haze.addColorStop(0,"#d7eee000");haze.addColorStop(.55,night?"#5b839022":"#f1e8c526");haze.addColorStop(1,"#d7eee000");
@@ -1976,10 +2054,21 @@ function animate(now) {
 }
 
 function setMapPanel(open) {
+  if(open) setWeatherPanel(false,false);
   $("map-panel").hidden=!open;
   $("map-button").setAttribute("aria-expanded",String(open));
   if(open) $("map-panel").querySelector(`[data-map="${worldMap}"]`)?.focus();
   else $("map-button").focus({preventScroll:true});
+}
+
+function setWeatherPanel(open,restoreFocus=true) {
+  if(open&&$("map-panel")&&!$("map-panel").hidden) {
+    $("map-panel").hidden=true;$("map-button").setAttribute("aria-expanded","false");
+  }
+  $("weather-panel").hidden=!open;
+  $("weather-button").setAttribute("aria-expanded",String(open));
+  if(open) $("weather-panel").querySelector(`[data-weather="${weatherMode}"]`)?.focus();
+  else if(restoreFocus) $("weather-button").focus({preventScroll:true});
 }
 
 function selectWorldMap(map,notify=true) {
@@ -1992,6 +2081,20 @@ function selectWorldMap(map,notify=true) {
   if(notify) {
     setMapPanel(false);
     showMessage(`${MAP_THEMES[map].label} 맵으로 변경했습니다.`,false,3500);
+  }
+}
+
+function selectWeather(mode,notify=true) {
+  if(!WEATHER_PRESETS[mode])return;
+  weatherMode=mode;
+  try{localStorage.setItem("aeronaut-weather",mode);}catch{}
+  $("flight").dataset.weather=mode;
+  $("weather-button").textContent=`날씨 · ${WEATHER_PRESETS[mode].label}`;
+  document.querySelectorAll("[data-weather]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.weather===mode)));
+  if(notify) {
+    setWeatherPanel(false);
+    const wind=WEATHER_PRESETS[mode].wind>=.4?" · 강한 돌풍":WEATHER_PRESETS[mode].wind>=.2?" · 약한 돌풍":"";
+    showMessage(`${WEATHER_PRESETS[mode].label} 날씨로 변경했습니다${wind}.`,false,4200);
   }
 }
 
@@ -2015,9 +2118,13 @@ $("audio-button").addEventListener("click",() => setSoundMuted(!sound.muted));
 $("map-button").addEventListener("click",()=>setMapPanel($("map-panel").hidden));
 $("map-close-button").addEventListener("click",()=>setMapPanel(false));
 document.querySelectorAll("[data-map]").forEach(button=>button.addEventListener("click",()=>selectWorldMap(button.dataset.map)));
+$("weather-button").addEventListener("click",()=>setWeatherPanel($("weather-panel").hidden));
+$("weather-close-button").addEventListener("click",()=>setWeatherPanel(false));
+document.querySelectorAll("[data-weather]").forEach(button=>button.addEventListener("click",()=>selectWeather(button.dataset.weather)));
 document.addEventListener("pointerdown",ensureAudio,{once:true});
 document.addEventListener("keydown", event => {
   if(event.code==="Escape"&&!$("map-panel").hidden){event.preventDefault();setMapPanel(false);return;}
+  if(event.code==="Escape"&&!$("weather-panel").hidden){event.preventDefault();setWeatherPanel(false);return;}
   if (event.repeat || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable) return;
   if (event.code === "KeyP") { event.preventDefault(); togglePause(); }
   if (event.code === "KeyB") { event.preventDefault(); toggleBrake(); }
@@ -2059,7 +2166,7 @@ document.addEventListener("visibilitychange",() => {
 });
 window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
 new ResizeObserver(resizeCanvas).observe(canvas);
-selectWorldMap(worldMap,false);resizeCanvas();updateHud();requestAnimationFrame(animate);
+selectWorldMap(worldMap,false);selectWeather(weatherMode,false);resizeCanvas();updateHud();requestAnimationFrame(animate);
 if (window.location.protocol === "file:") {
   $("local-server-link").hidden = false;
   showMessage("파일을 직접 열었습니다. 아래 버튼으로 로컬 서버에서 열거나 VS Code Live Server를 사용해주세요.", true);
