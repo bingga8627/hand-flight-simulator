@@ -1113,8 +1113,9 @@ function drawWorld(now) {
   // 지면의 원근 격자와 패치가 전진감을 줍니다. 고도에 따라 격자 크기도 완만히 변합니다.
   const scale = clamp(2400 / (flight.altitude + 400), 0.35, 2);
   const drift = Math.sin(radians(flight.heading - 300)) * width * 0.7;
+  const texturedGround=Boolean(terrainTextures[worldMap]?.complete&&terrainTextures[worldMap]?.naturalWidth);
   // 실제 조종석 시야처럼 지면 격자는 거의 보이지 않게 두고 빠른 이동감만 남깁니다.
-  ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${theme.grid},.035)`;
+  ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${theme.grid},${texturedGround?.008:.035})`;
   for (let i = -16; i <= 16; i++) {
     ctx.beginPath(); ctx.moveTo(i * 20 + drift * 0.07, 0); ctx.lineTo(i * width * 0.21 + drift, extent); ctx.stroke();
   }
@@ -1122,7 +1123,7 @@ function drawWorld(now) {
     // 속도에 비례해 격자가 조종석 쪽으로 흘러 지상에서도 가속감을 읽을 수 있습니다.
     const depth = ((i / 19 + flight.distance * 2.4) % 1);
     const y = depth * depth * height * 1.65 * scale;
-    ctx.strokeStyle = `rgba(${theme.grid},${depth*.045})`;
+    ctx.strokeStyle = `rgba(${theme.grid},${depth*(texturedGround?.01:.045)})`;
     ctx.beginPath(); ctx.moveTo(-extent, y); ctx.lineTo(extent, y); ctx.stroke();
   }
   if(worldMap==="ocean-islands") drawOceanScenery(); else drawCityScenery(theme);
@@ -1646,7 +1647,7 @@ function drawGroundEllipse(centerX,centerZ,radiusX,radiusZ,color) {
 }
 
 function drawOceanScenery() {
-  const detailAlpha=clamp(1-(flight.altitude-200)/2100,.06,1);
+  const detailAlpha=clamp(1-(flight.altitude-200)/2100,0,1);
   ctx.save();ctx.globalAlpha=detailAlpha;
   const rowBase=Math.floor(lesson.z/700);
   // 훈련 활주로는 작은 공항 섬 위에 놓입니다.
