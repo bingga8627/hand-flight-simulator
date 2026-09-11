@@ -1113,7 +1113,8 @@ function drawWorld(now) {
   // 지면의 원근 격자와 패치가 전진감을 줍니다. 고도에 따라 격자 크기도 완만히 변합니다.
   const scale = clamp(2400 / (flight.altitude + 400), 0.35, 2);
   const drift = Math.sin(radians(flight.heading - 300)) * width * 0.7;
-  ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${theme.grid},.13)`;
+  // 실제 조종석 시야처럼 지면 격자는 거의 보이지 않게 두고 빠른 이동감만 남깁니다.
+  ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${theme.grid},.035)`;
   for (let i = -16; i <= 16; i++) {
     ctx.beginPath(); ctx.moveTo(i * 20 + drift * 0.07, 0); ctx.lineTo(i * width * 0.21 + drift, extent); ctx.stroke();
   }
@@ -1121,7 +1122,7 @@ function drawWorld(now) {
     // 속도에 비례해 격자가 조종석 쪽으로 흘러 지상에서도 가속감을 읽을 수 있습니다.
     const depth = ((i / 19 + flight.distance * 2.4) % 1);
     const y = depth * depth * height * 1.65 * scale;
-    ctx.strokeStyle = `rgba(${theme.grid},${depth*.17})`;
+    ctx.strokeStyle = `rgba(${theme.grid},${depth*.045})`;
     ctx.beginPath(); ctx.moveTo(-extent, y); ctx.lineTo(extent, y); ctx.stroke();
   }
   if(worldMap==="ocean-islands") drawOceanScenery(); else drawCityScenery(theme);
@@ -1248,8 +1249,8 @@ function drawTerrainImage(theme,extent) {
   const horizontalPhase=lateral/image.naturalWidth;
   ctx.save();
   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
-  ctx.globalAlpha=worldMap==="night-city"?.52:worldMap==="ocean-islands"?.62:.50;
-  ctx.globalCompositeOperation=theme.night?"screen":"soft-light";
+  const baseAlpha=worldMap==="night-city"?.72:worldMap==="ocean-islands"?.76:.70;
+  ctx.globalCompositeOperation="source-over";
   for(let index=0;index<slices;index++) {
     const near=index/slices,far=(index+1)/slices;
     const yNear=near*near*height*1.85,yFar=far*far*height*1.85+1;
@@ -1258,6 +1259,8 @@ function drawTerrainImage(theme,extent) {
     const safeHeight=Math.min(sourceHeight+2,image.naturalHeight-sourceY);
     if(safeHeight<=0)continue;
     ctx.save();
+    // 멀리 있는 지표는 대기 산란으로 색과 명암이 약해지고 가까운 지표만 선명하게 보입니다.
+    ctx.globalAlpha=baseAlpha*(.12+far*.88);
     ctx.beginPath();ctx.moveTo(-nearHalf,yNear);ctx.lineTo(nearHalf,yNear);
     ctx.lineTo(farHalf,yFar);ctx.lineTo(-farHalf,yFar);ctx.closePath();ctx.clip();
     const stripWidth=farHalf*2,shift=horizontalPhase*stripWidth;
@@ -1322,6 +1325,7 @@ function irregularAirfieldPolygon(inset=0) {
 // 활주로 바깥에도 이어지는 농지·도심 블록·사막 지표와 공항 부지를 만듭니다.
 function drawRegionalGround(theme) {
   const baseZ=Math.floor(lesson.z/480)*480;
+  const hasTexture=Boolean(terrainTextures[worldMap]?.complete&&terrainTextures[worldMap]?.naturalWidth);
   if(worldMap==="ocean-islands") {
     if(lesson.mode!=="free") {
       drawGroundPolygon(irregularAirfieldPolygon(0),"#d7c88a","#f0df9c88");
@@ -1332,20 +1336,23 @@ function drawRegionalGround(theme) {
     return;
   }
 
-  const palettes=theme.desert
-    ?["#b1875a88","#9c734e82","#c0996588","#7d593f82"]
-    :theme.night?["#142b2d88","#10232688","#1b343388","#0b1d2288"]
-      :["#58745c80","#6f86657d","#496b587d","#81906a78"];
-  for(let row=-6;row<15;row++) for(let column=-5;column<=5;column++) {
-    if(Math.abs(column)<1)continue;
-    const seed=(baseZ/480+row)*17.1+column*4.7;
-    const z=baseZ+row*480+8,x=column*310-145;
-    const pad=10+sceneryNoise(seed)*18;
-    runwayRectangle(x+pad,z+pad,x+285-pad,z+455-pad,palettes[Math.abs(Math.floor(seed))%palettes.length]);
-    if(!theme.desert) {
-      const edge=theme.night?"#48605c25":"#d3d9ac2d";
-      runwayRectangle(x+pad,z+pad,x+pad+2,z+455-pad,edge);
-      runwayRectangle(x+pad,z+pad,x+285-pad,z+pad+2,edge);
+  // 이미지가 준비되기 전의 대체 지형에서만 큰 색면을 사용합니다. 텍스처 위에 겹치면 모형 같은 사각 패턴이 생깁니다.
+  if(!hasTexture) {
+    const palettes=theme.desert
+      ?["#b1875a88","#9c734e82","#c0996588","#7d593f82"]
+      :theme.night?["#142b2d88","#10232688","#1b343388","#0b1d2288"]
+        :["#58745c80","#6f86657d","#496b587d","#81906a78"];
+    for(let row=-6;row<15;row++) for(let column=-5;column<=5;column++) {
+      if(Math.abs(column)<1)continue;
+      const seed=(baseZ/480+row)*17.1+column*4.7;
+      const z=baseZ+row*480+8,x=column*310-145;
+      const pad=10+sceneryNoise(seed)*18;
+      runwayRectangle(x+pad,z+pad,x+285-pad,z+455-pad,palettes[Math.abs(Math.floor(seed))%palettes.length]);
+      if(!theme.desert) {
+        const edge=theme.night?"#48605c25":"#d3d9ac2d";
+        runwayRectangle(x+pad,z+pad,x+pad+2,z+455-pad,edge);
+        runwayRectangle(x+pad,z+pad,x+285-pad,z+pad+2,edge);
+      }
     }
   }
 
@@ -1405,17 +1412,20 @@ function drawProjectedTree(worldX,worldZ,night=false) {
 // 지면에 큰 색면을 흩뿌려 한 장의 그라데이션처럼 보이는 현상을 줄입니다.
 function drawTerrainTexture(theme) {
   if(worldMap==="ocean-islands") return;
+  const hasTexture=Boolean(terrainTextures[worldMap]?.complete&&terrainTextures[worldMap]?.naturalWidth);
   const baseZ=Math.floor(lesson.z/520)*520;
-  const colors=theme.desert?["#c59a6555","#704b3650","#d2ae7550"]:theme.night?["#18353a55","#0a171d66","#25404944"]:["#79906b42","#304d454d","#8ba07338"];
-  for(let row=-5;row<13;row++) {
-    const index=baseZ/520+row,seed=index*8.17;
-    for(const side of [-1,1]) {
-      const z=baseZ+row*520+(sceneryNoise(seed+side*2.2)-.5)*240;
-      const x=side*(260+sceneryNoise(seed+side*6.4)*760);
-      drawGroundEllipse(x,z,130+sceneryNoise(seed+3.1)*260,60+sceneryNoise(seed+9.2)*150,colors[Math.abs(Math.floor(seed))%colors.length]);
+  if(!hasTexture) {
+    const colors=theme.desert?["#c59a6555","#704b3650","#d2ae7550"]:theme.night?["#18353a55","#0a171d66","#25404944"]:["#79906b42","#304d454d","#8ba07338"];
+    for(let row=-5;row<13;row++) {
+      const index=baseZ/520+row,seed=index*8.17;
+      for(const side of [-1,1]) {
+        const z=baseZ+row*520+(sceneryNoise(seed+side*2.2)-.5)*240;
+        const x=side*(260+sceneryNoise(seed+side*6.4)*760);
+        drawGroundEllipse(x,z,130+sceneryNoise(seed+3.1)*260,60+sceneryNoise(seed+9.2)*150,colors[Math.abs(Math.floor(seed))%colors.length]);
+      }
     }
   }
-  if(theme.desert) drawDesertBaseDetails(baseZ);
+  if(theme.desert&&flight.altitude<1800) drawDesertBaseDetails(baseZ);
 }
 
 // 두 겹의 산맥은 서로 다른 속도로 흘러 가까운 능선과 먼 능선의 깊이를 만듭니다.
@@ -1464,7 +1474,9 @@ function drawNightSky(extent) {
 function drawDistantSkyline(extent,theme) {
   // 높은 고도에서도 도시임을 알아볼 수 있도록 먼 수평선에 낮은 스카이라인을 둡니다.
   const step=24,offset=((flight.heading*7+lesson.x*.035)%step+step)%step;
-  ctx.save();
+  const skylineAlpha=clamp(1-flight.altitude/2300,0,.62);
+  if(skylineAlpha<=0)return;
+  ctx.save();ctx.globalAlpha=skylineAlpha;
   for(let x=-extent-offset,index=Math.floor((-extent-offset)/step);x<extent;x+=step,index++) {
     const seed=index*3.73,heightA=5+sceneryNoise(seed)*24;
     const buildingWidth=12+sceneryNoise(seed+2.4)*11,top=-heightA;
@@ -1483,6 +1495,9 @@ function drawDistantSkyline(extent,theme) {
 }
 
 function drawCityScenery(theme) {
+  // 고도에서는 항공 텍스처가 도시 규모를 표현하고, 개별 건물은 저고도에서만 드러납니다.
+  const detailAlpha=clamp(1-(flight.altitude-250)/2500,.08,1);
+  ctx.save();ctx.globalAlpha=detailAlpha;
   const roadBase=Math.floor(lesson.z/2000)*2000;
   // 활주로 양옆의 간선도로와 반복되는 연결도로. 중앙 160m는 비워 이착륙 시야를 보존합니다.
   runwayRectangle(-128,roadBase-5000,-117,roadBase+7000,theme.road);
@@ -1511,8 +1526,9 @@ function drawCityScenery(theme) {
   }
   // 먼 건물부터 그려 가까운 건물이 자연스럽게 앞을 가리게 합니다.
   buildings.sort((a,b)=>b.camera.z-a.camera.z);
-  buildings.forEach(building=>drawCityBuilding(building,theme));
+  buildings.forEach(building=>drawCityBuilding(building,theme,detailAlpha));
   drawCityLandmarks(theme,roadBase);
+  ctx.restore();
 }
 
 function drawCityTraffic(roadBase,theme) {
@@ -1556,14 +1572,14 @@ function drawRoadLights(roadBase) {
   ctx.restore();
 }
 
-function drawCityBuilding(building,theme) {
+function drawCityBuilding(building,theme,detailAlpha=1) {
   const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2,z=building.camera.z;
   const centerX=building.camera.x*focal/z,halfWidth=building.width*focal/z*.5;
   const bottom=eyeHeight*focal/z,top=(eyeHeight-building.height)*focal/z;
   if(centerX+halfWidth<-width||centerX-halfWidth>width||top>height*1.3) return;
   const haze=clamp(1-z/CITY_DRAW_DISTANCE,.16,.88);
   const shade=sceneryNoise(building.seed+11);
-  ctx.save();ctx.globalAlpha=haze;
+  ctx.save();ctx.globalAlpha=haze*detailAlpha;
   ctx.fillStyle=shade>.66?theme.buildings[0]:shade>.33?theme.buildings[1]:theme.buildings[2];
   ctx.fillRect(centerX-halfWidth,top,halfWidth*2,Math.max(1,bottom-top));
   // 햇빛을 받는 얇은 측면과 옥상으로 단순한 입체감을 냅니다.
@@ -1630,6 +1646,8 @@ function drawGroundEllipse(centerX,centerZ,radiusX,radiusZ,color) {
 }
 
 function drawOceanScenery() {
+  const detailAlpha=clamp(1-(flight.altitude-200)/2100,.06,1);
+  ctx.save();ctx.globalAlpha=detailAlpha;
   const rowBase=Math.floor(lesson.z/700);
   // 훈련 활주로는 작은 공항 섬 위에 놓입니다.
   if(lesson.mode!=="free") runwayRectangle(-105,-180,105,RUNWAY.length+180,"#61765f");
@@ -1669,6 +1687,7 @@ function drawOceanScenery() {
     const z=waveBase-300+i*170,widthAt=25+i*15;
     runwayRectangle(-widthAt,z,widthAt,z+1.5,worldMap==="night-city"?"#dcece633":"#d9f4df35");
   }
+  ctx.restore();
 }
 
 function drawProjectedMarker(worldX,worldZ,color,size=2) {
