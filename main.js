@@ -1108,6 +1108,7 @@ function drawWorld(now) {
 
   drawCloudField(theme,now,weather);
   drawTerrainImage(theme,extent);
+  if(terrainReady) drawWorldDetailOverlay(theme);
   drawRegionalGround(theme);
   drawTerrainTexture(theme);
 
@@ -1256,6 +1257,7 @@ function drawTerrainImage(theme,extent) {
   ctx.save();
   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
   const baseAlpha=worldMap==="night-city"?.72:worldMap==="ocean-islands"?.76:.70;
+  ctx.filter=theme.night?"contrast(1.16) brightness(.86) saturate(.86)":"contrast(1.12) saturate(.94)";
   ctx.globalCompositeOperation="source-over";
   for(let index=0;index<slices;index++) {
     const near=index/slices,far=(index+1)/slices;
@@ -1281,6 +1283,79 @@ function drawTerrainImage(theme,extent) {
   ctx.globalCompositeOperation="source-over";ctx.globalAlpha=1;ctx.fillStyle=shade;
   ctx.fillRect(-extent,0,extent*2,height*1.4);
   ctx.restore();
+}
+
+// 고해상도 텍스처 위에는 면을 덮는 도형 대신 월드 좌표에 고정된 작은 지표만 합성합니다.
+// 이 레이어는 비행기 위치와 함께 투영되므로 배경과 따로 미끄러지지 않습니다.
+function drawWorldDetailOverlay(theme) {
+  const baseZ=Math.floor(lesson.z/900)*900;
+  const altitudeFade=clamp(1-flight.altitude/6200,.24,.92);
+  ctx.save();ctx.globalAlpha=altitudeFade;
+
+  if(worldMap==="mountain-city"||worldMap==="night-city") {
+    const road=theme.night?"#7da39a2d":"#263b3942";
+    const shoulder=theme.night?"#101f2455":"#b8b79d20";
+    // 큰 격자 대신 간격과 폭이 다른 실제 도로망처럼 드문 선형 지표를 사용합니다.
+    for(const [index,x] of [-1080,-690,-380,420,760,1160].entries()) {
+      const bend=(sceneryNoise(index*7.3)-.5)*95;
+      runwayRectangle(x-5,baseZ-3800,x+5,baseZ+6100,shoulder);
+      runwayRectangle(x-2.3,baseZ-3800,x+2.3,baseZ+6100,road);
+      runwayRectangle(x+bend-1.2,baseZ-2100,x+bend+1.2,baseZ+3600,theme.night?"#b9d89025":"#d6d5b51c");
+    }
+    for(let row=-4;row<=6;row++) {
+      const z=baseZ+row*900+(sceneryNoise(row*8.2)*180-90);
+      const inset=120+sceneryNoise(row*3.9)*170;
+      runwayRectangle(-1350,z,-inset,z+5.5,road);runwayRectangle(inset,z,1350,z+5.5,road);
+      if(theme.night) for(let light=-1200;light<=1200;light+=145) {
+        if(Math.abs(light)<inset)continue;
+        drawProjectedMarker(light,z+2.8,"#efcf78",1.15);
+      }
+    }
+    // 가까이 내려오면 활주로에서 충분히 떨어진 낮은 구조물만 더해 거대한 상자형 스카이라인을 피합니다.
+    if(flight.altitude<950) drawLowAltitudeStructures(theme,baseZ);
+  } else if(worldMap==="desert-base") {
+    const track="#6c533c52",edge="#e0b87c1e";
+    for(let lane=-3;lane<=3;lane++) {
+      if(lane===0)continue;
+      const x=lane*260+(sceneryNoise(lane*4.1)-.5)*75;
+      runwayRectangle(x-4,baseZ-3300,x+4,baseZ+5600,track);
+      runwayRectangle(x-1,baseZ-3300,x+1,baseZ+5600,edge);
+    }
+    for(let row=-3;row<=5;row++) {
+      const z=baseZ+row*1080+sceneryNoise(row*5.7)*130;
+      runwayRectangle(-1250,z,-180,z+4,track);runwayRectangle(180,z,1250,z+4,track);
+    }
+    if(flight.altitude<900) drawDesertBaseDetails(baseZ);
+  } else if(worldMap==="ocean-islands") {
+    // 고정된 잔물결과 작은 백파만 더해 수면의 축척을 보여주고 인공 섬 도형은 만들지 않습니다.
+    for(let row=-5;row<=8;row++) {
+      const z=baseZ+row*620,seed=row*12.7+baseZ*.001;
+      for(let mark=0;mark<5;mark++) {
+        const x=(sceneryNoise(seed+mark*4.8)-.5)*2500;
+        const length=10+sceneryNoise(seed+mark*8.1)*34;
+        runwayRectangle(x-length,z+mark*57,x+length,z+mark*57+1.1,"#d7f2ed38");
+      }
+    }
+  }
+  ctx.restore();
+}
+
+function drawLowAltitudeStructures(theme,baseZ) {
+  const structures=[];
+  for(let row=-3;row<=7;row++) for(const side of [-1,1]) {
+    const seed=row*8.37+side*31.4;
+    const z=baseZ+row*460+120+sceneryNoise(seed)*180;
+    const x=side*(390+sceneryNoise(seed+3.2)*620);
+    const camera=runwayCameraPoint(x,z);if(camera.z<90||camera.z>3200)continue;
+    structures.push({
+      camera,z,x,seed,
+      width:28+sceneryNoise(seed+6.1)*58,
+      height:8+sceneryNoise(seed+9.4)*(theme.night?34:22)
+    });
+  }
+  structures.sort((a,b)=>b.camera.z-a.camera.z);
+  const opacity=clamp(1-flight.altitude/950,.12,.58);
+  structures.forEach(building=>drawCityBuilding(building,theme,opacity));
 }
 
 // 태양·달·수평선 안개를 더해 각 맵의 시간대와 대기감을 분명하게 만듭니다.
