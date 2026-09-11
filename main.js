@@ -1092,6 +1092,7 @@ function drawWorld(now) {
   const extent = Math.hypot(width, height) * 2;
   const theme=MAP_THEMES[worldMap];
   const weather=WEATHER_PRESETS[weatherMode];
+  const terrainReady=Boolean(terrainTextures[worldMap]?.complete&&terrainTextures[worldMap]?.naturalWidth);
   const skyColors=weather.sky||theme.sky;
   const sky = ctx.createLinearGradient(0, -height, 0, 20);
   sky.addColorStop(0,skyColors[0]);sky.addColorStop(.65,skyColors[1]);sky.addColorStop(1,skyColors[2]);
@@ -1103,7 +1104,7 @@ function drawWorld(now) {
   drawSkyDetails(extent,theme,now,weather);
   if(theme.night&&weatherMode==="clear") drawNightSky(extent);
   if(theme.mountain) drawMountainRanges(extent,theme);
-  if(worldMap==="mountain-city"||worldMap==="night-city") drawDistantSkyline(extent,theme);
+  if(!terrainReady&&(worldMap==="mountain-city"||worldMap==="night-city")) drawDistantSkyline(extent,theme);
 
   drawCloudField(theme,now,weather);
   drawTerrainImage(theme,extent);
@@ -1113,7 +1114,7 @@ function drawWorld(now) {
   // 지면의 원근 격자와 패치가 전진감을 줍니다. 고도에 따라 격자 크기도 완만히 변합니다.
   const scale = clamp(2400 / (flight.altitude + 400), 0.35, 2);
   const drift = Math.sin(radians(flight.heading - 300)) * width * 0.7;
-  const texturedGround=Boolean(terrainTextures[worldMap]?.complete&&terrainTextures[worldMap]?.naturalWidth);
+  const texturedGround=terrainReady;
   // 실제 조종석 시야처럼 지면 격자는 거의 보이지 않게 두고 빠른 이동감만 남깁니다.
   ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${theme.grid},${texturedGround?.008:.035})`;
   for (let i = -16; i <= 16; i++) {
@@ -1126,7 +1127,10 @@ function drawWorld(now) {
     ctx.strokeStyle = `rgba(${theme.grid},${depth*(texturedGround?.01:.045)})`;
     ctx.beginPath(); ctx.moveTo(-extent, y); ctx.lineTo(extent, y); ctx.stroke();
   }
-  if(worldMap==="ocean-islands") drawOceanScenery(); else drawCityScenery(theme);
+  // 텍스처 지형과 예전 절차 지형을 동시에 표시하지 않습니다. 로딩 실패 때만 절차 지형을 대체 화면으로 사용합니다.
+  if(!terrainReady) {
+    if(worldMap==="ocean-islands") drawOceanScenery(); else drawCityScenery(theme);
+  }
   if (lesson.mode !== "free") drawRunway();
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointRings();
   // 먼 수평선: 기울기와 피치 방향을 쉽게 읽을 수 있는 얇은 빛.
@@ -1245,8 +1249,9 @@ function drawTerrainImage(theme,extent) {
   const image=terrainTexture(worldMap);
   if(!image||!image.complete||!image.naturalWidth)return;
   const slices=28,sourceHeight=image.naturalHeight/slices;
-  const forward=((lesson.z*.16+flight.distance*2600)%image.naturalHeight+image.naturalHeight)%image.naturalHeight;
-  const lateral=((lesson.x*.13+angleDifference(flight.heading,RUNWAY.heading)*4.2)%image.naturalWidth+image.naturalWidth)%image.naturalWidth;
+  // 별도 애니메이션 값을 섞지 않고 실제 월드 위치에만 고정합니다. 전진하면 지형 특징이 조종석 방향으로 이동합니다.
+  const forward=((-lesson.z*.16)%image.naturalHeight+image.naturalHeight)%image.naturalHeight;
+  const lateral=((lesson.x*.13)%image.naturalWidth+image.naturalWidth)%image.naturalWidth;
   const horizontalPhase=lateral/image.naturalWidth;
   ctx.save();
   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
@@ -1365,8 +1370,8 @@ function drawRegionalGround(theme) {
     drawAirportInfrastructure(theme.desert?"#64584d":"#485d58",theme.desert?"#9e9485":"#7e8c82");
   }
 
-  if(worldMap==="mountain-city") drawRiverAndForest(baseZ,false);
-  if(worldMap==="night-city") drawRiverAndForest(baseZ,true);
+  if(!hasTexture&&worldMap==="mountain-city") drawRiverAndForest(baseZ,false);
+  if(!hasTexture&&worldMap==="night-city") drawRiverAndForest(baseZ,true);
 }
 
 function drawAirportInfrastructure(taxiway,apron) {
@@ -1426,7 +1431,7 @@ function drawTerrainTexture(theme) {
       }
     }
   }
-  if(theme.desert&&flight.altitude<1800) drawDesertBaseDetails(baseZ);
+  if(!hasTexture&&theme.desert&&flight.altitude<1800) drawDesertBaseDetails(baseZ);
 }
 
 // 두 겹의 산맥은 서로 다른 속도로 흘러 가까운 능선과 먼 능선의 깊이를 만듭니다.
