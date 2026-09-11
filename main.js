@@ -42,7 +42,7 @@ const CALIBRATION_TIMEOUT_MS = 20000;
 const CALIBRATION_STABILITY = 0.045; // 기준 샘플로부터 허용하는 정규화 이동 거리
 // 이착륙은 실제 항공 규정이 아닌 이 프로토타입의 훈련 판정값입니다.
 const RUNWAY = { length: 2200, width: 60, heading: 300, rotationSpeed: 70, rotationPitch: 4, maxLandingSpeed: 130, minLandingSpeed: 45, maxSink: 12, maxBank: 12, maxHeadingError: 18 };
-const MISSION_CHECKPOINTS = [
+let MISSION_CHECKPOINTS = [
   // 활주로 앞쪽의 가까운 구역에서 짧게 좌우 이동하는 연속 코스입니다.
   { x:0, z:500, altitude:180 },
   { x:70, z:900, altitude:260 },
@@ -50,6 +50,12 @@ const MISSION_CHECKPOINTS = [
   { x:60, z:1700, altitude:300 },
   { x:0, z:2100, altitude:240 }
 ];
+const MISSION_PROFILES = {
+  "mountain-city":{map:"mountain-city",title:"산악 도시 순환",difficulty:"보통",time:"약 3분",speed:[105,145],description:"산맥 아래의 굽은 항로를 따라 상승한 뒤 도시 활주로로 복귀합니다.",checkpoints:[{x:0,z:500,altitude:180},{x:85,z:900,altitude:300},{x:-75,z:1300,altitude:460},{x:105,z:1700,altitude:370},{x:0,z:2100,altitude:250}]},
+  "ocean-islands":{map:"ocean-islands",title:"군도 해상 순찰",difficulty:"쉬움",time:"약 3분",speed:[100,140],description:"섬 사이를 넓게 선회하며 해상 항로를 확인하고 공항 섬으로 돌아옵니다.",checkpoints:[{x:0,z:500,altitude:160},{x:-120,z:900,altitude:220},{x:135,z:1300,altitude:285},{x:-90,z:1700,altitude:235},{x:0,z:2100,altitude:180}]},
+  "desert-base":{map:"desert-base",title:"사막 저고도 침투",difficulty:"어려움",time:"약 2분 30초",speed:[115,155],description:"낮은 목표 고도를 유지하며 기지 외곽을 통과한 뒤 정밀 착륙합니다.",checkpoints:[{x:0,z:500,altitude:130},{x:95,z:900,altitude:175},{x:-110,z:1300,altitude:220},{x:120,z:1700,altitude:165},{x:0,z:2100,altitude:130}]},
+  "night-city":{map:"night-city",title:"야간 항법 비행",difficulty:"어려움",time:"약 3분",speed:[100,140],description:"도시 항법등과 HUD를 따라 제한된 시야에서 야간 접근을 완료합니다.",checkpoints:[{x:0,z:500,altitude:200},{x:-75,z:900,altitude:270},{x:65,z:1300,altitude:330},{x:-45,z:1700,altitude:270},{x:0,z:2100,altitude:200}]}
+};
 const CHECKPOINT_RADIUS = 155; // 초보 조종을 고려한 수평 통과 판정 반지름(m)
 const CHECKPOINT_VISUAL_RADIUS = 75; // 보이는 링의 물리 반지름(m). 판정 범위보다 작아 조준하기 쉽습니다.
 const CHECKPOINT_ALTITUDE_TOLERANCE = 180; // 손 조종 오차를 고려한 통과 허용 고도 차이(ft)
@@ -86,7 +92,7 @@ const landmarkCtx = landmarkCanvas.getContext("2d");
 const ui = Object.fromEntries(["speed-value","altitude-value","throttle-value","pitch-value","roll-value","elevator-value","vertical-speed","heading-value","right-status","left-status","stick-status","pinch-status","right-dot","left-dot","hand-count","throttle-fill","throttle-handle","stick-hint"].map(id => [id, $(id)]));
 const flight = { speed: 120, altitude: 2400, throttle: 55, pitch: 0, roll: 0, heading: 300, verticalSpeed: 0, distance: 0 };
 const lesson = { mode: "free", phase: "airborne", paused: false, brake: false, x: 0, z: 80, tookOff: false, takeoffNotified: false, touchdown: null, result: null, callouts: {}, approachAssistNotified:false };
-const mission = { checkpoint:0, elapsed:0, returning:false, gateEffect:null, gateStatus:"", retries:0 };
+const mission = { checkpoint:0, elapsed:0, returning:false, gateEffect:null, gateStatus:"", retries:0, profileId:"mountain-city" };
 const stick = { x: 0, y: 0, grabbed: false, anchor: null, depthAnchor: null, depthShape: null };
 const sound = { context:null, master:null, engineGain:null, engineOscillator:null, engineHarmonic:null, engineFilter:null, engineNoise:null, engineNoiseGain:null, engineNoiseFilter:null, engineTurbine:null, engineTurbineGain:null, engineAir:null, engineAirGain:null, engineAirFilter:null, engineCompressor:null, muted:false };
 const effects = { stall:false, lastStallTone:0 };
@@ -100,6 +106,7 @@ let inferenceFailures = 0, messageTimer = 0;
 let connectionStage = "idle";
 let worldMap = (()=>{try{const saved=localStorage.getItem("aeronaut-map");return MAP_THEMES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
 let weatherMode = (()=>{try{const saved=localStorage.getItem("aeronaut-weather");return WEATHER_PRESETS[saved]?saved:"clear";}catch{return "clear";}})();
+let selectedMissionId = (()=>{try{const saved=localStorage.getItem("aeronaut-mission");return MISSION_PROFILES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
 // 기준 위치는 현재 카메라 연결 동안만 유지합니다. 이미지나 랜드마크는 저장하지 않습니다.
 const calibration = { active: false, neutral: null, palmScale: null, palmShape: null, started: 0, held: 0, lastSample: 0, reference: null, referenceScale: null, sumScale: 0, sumShape: 0, sumX: 0, sumY: 0, count: 0, note: "이지 조종은 손을 보여주면 자동으로 시작합니다. C 키는 표시 중심을 맞출 때만 사용합니다." };
 
@@ -255,6 +262,7 @@ function finishLesson(success, description) {
   const landingScore = success ? clamp(100-touchdown.sink*3-touchdown.bank*1.5-touchdown.headingError-Math.abs(touchdown.x)*.5,0,100) : 0;
   const timeScore = clamp(100-Math.max(0,mission.elapsed-120)*.35,30,100);
   const score = success ? Math.round(lesson.mode === "mission" ? landingScore*.75+timeScore*.25 : landingScore) : 0;
+  if(success&&lesson.mode==="mission") saveMissionBest(mission.profileId,score);
   lesson.result = { success, score, description };
   lesson.phase = success ? "complete" : "failed";
   releaseStick();
@@ -263,7 +271,7 @@ function finishLesson(success, description) {
   $("result-title").textContent = success ? `${lesson.mode === "mission" ? "미션 완료" : "착륙 완료"} · ${score}점` : lesson.mode === "mission" ? "미션 종료" : "훈련 종료";
   $("result-description").textContent = description;
   $("result-metrics").textContent = touchdown
-    ? `${lesson.mode === "mission" ? `체크포인트  ${mission.checkpoint} / ${MISSION_CHECKPOINTS.length}\n비행 시간  ${formatMissionTime(mission.elapsed)}\n` : ""}접지 속도  ${touchdown.speed.toFixed(0)} KTS\n접지 하강률  ${(touchdown.sink * 60).toFixed(0)} FT/MIN\n접지 Pitch  ${touchdown.pitch.toFixed(1)}°\n접지 기울기  ${touchdown.bank.toFixed(1)}°\n중심선 편차  ${Math.abs(touchdown.x).toFixed(1)} M`
+    ? `${lesson.mode === "mission" ? `미션  ${MISSION_PROFILES[mission.profileId]?.title||"통합 미션"}\n체크포인트  ${mission.checkpoint} / ${MISSION_CHECKPOINTS.length}\n비행 시간  ${formatMissionTime(mission.elapsed)}\n` : ""}접지 속도  ${touchdown.speed.toFixed(0)} KTS\n접지 하강률  ${(touchdown.sink * 60).toFixed(0)} FT/MIN\n접지 Pitch  ${touchdown.pitch.toFixed(1)}°\n접지 기울기  ${touchdown.bank.toFixed(1)}°\n중심선 편차  ${Math.abs(touchdown.x).toFixed(1)} M`
     : `속도  ${flight.speed.toFixed(0)} KTS\n활주로 진행  ${lesson.z.toFixed(0)} M`;
   clearTimeout(messageTimer); $("message").hidden = true;
   // 결과창이 뜨는 프레임에도 고도와 속도를 즉시 갱신해 접지 전 값이 남지 않게 합니다.
@@ -1993,7 +2001,8 @@ function updateLessonHud() {
     $("runway-distance").textContent=`GATE ${mission.checkpoint+1}/${MISSION_CHECKPOINTS.length}`;
     $("lateral-error").textContent=`${Math.round(horizontal)} M`;
     $("glide-error").textContent=`${altitudeError>=0?"높음":"낮음"} ${Math.abs(Math.round(altitudeError))} FT`;
-    $("target-speed").textContent="110–150 KTS";
+    const profile=MISSION_PROFILES[mission.profileId];
+    $("target-speed").textContent=profile?`${profile.speed[0]}–${profile.speed[1]} KTS`:"110–150 KTS";
     $("director-status").textContent = director?.onTarget ? "정렬" : Math.abs(bearing)<8 ? "정면" : `${bearing>0?"우":"좌"} ${Math.abs(Math.round(bearing))}°`;
     $("phase-label").textContent=`체크포인트 ${mission.checkpoint+1} 접근`;
     $("lesson-instruction").textContent=mission.gateStatus
@@ -2055,6 +2064,7 @@ function animate(now) {
 
 function setMapPanel(open) {
   if(open) setWeatherPanel(false,false);
+  if(open) setMissionPanel(false,false);
   $("map-panel").hidden=!open;
   $("map-button").setAttribute("aria-expanded",String(open));
   if(open) $("map-panel").querySelector(`[data-map="${worldMap}"]`)?.focus();
@@ -2062,6 +2072,7 @@ function setMapPanel(open) {
 }
 
 function setWeatherPanel(open,restoreFocus=true) {
+  if(open) setMissionPanel(false,false);
   if(open&&$("map-panel")&&!$("map-panel").hidden) {
     $("map-panel").hidden=true;$("map-button").setAttribute("aria-expanded","false");
   }
@@ -2069,6 +2080,57 @@ function setWeatherPanel(open,restoreFocus=true) {
   $("weather-button").setAttribute("aria-expanded",String(open));
   if(open) $("weather-panel").querySelector(`[data-weather="${weatherMode}"]`)?.focus();
   else if(restoreFocus) $("weather-button").focus({preventScroll:true});
+}
+
+function missionBest(profileId) {
+  try{return Number(localStorage.getItem(`aeronaut-mission-best-${profileId}`))||0;}catch{return 0;}
+}
+
+function saveMissionBest(profileId,score) {
+  const best=Math.max(missionBest(profileId),score);
+  try{localStorage.setItem(`aeronaut-mission-best-${profileId}`,String(best));}catch{}
+  refreshMissionBests();
+}
+
+function refreshMissionBests() {
+  document.querySelectorAll("[data-best]").forEach(label=>{
+    const best=missionBest(label.dataset.best);label.textContent=best?`BEST ${best}점`:"BEST —";
+  });
+}
+
+function setMissionPanel(open,restoreFocus=true) {
+  if(open) {
+    if(!$("map-panel").hidden){$("map-panel").hidden=true;$("map-button").setAttribute("aria-expanded","false");}
+    if(!$("weather-panel").hidden){$("weather-panel").hidden=true;$("weather-button").setAttribute("aria-expanded","false");}
+    selectMissionCard(selectedMissionId);
+    refreshMissionBests();
+  }
+  $("mission-panel").hidden=!open;
+  $("mission-button").setAttribute("aria-expanded",String(open));
+  if(open) $("mission-panel").querySelector(`[data-mission="${selectedMissionId}"]`)?.focus();
+  else if(restoreFocus) $("mission-button").focus({preventScroll:true});
+}
+
+function selectMissionCard(profileId) {
+  const profile=MISSION_PROFILES[profileId];if(!profile)return;
+  selectedMissionId=profileId;
+  try{localStorage.setItem("aeronaut-mission",profileId);}catch{}
+  document.querySelectorAll("[data-mission]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.mission===profileId)));
+  $("mission-brief-title").textContent=profile.title;
+  $("mission-difficulty").textContent=`난이도 ${profile.difficulty} · ${profile.time} · ${profile.speed[0]}–${profile.speed[1]} KTS`;
+  $("mission-description").textContent=profile.description;
+  $("mission-weather").textContent=`현재 날씨 · ${WEATHER_PRESETS[weatherMode].label}`;
+}
+
+function beginSelectedMission() {
+  const profile=MISSION_PROFILES[selectedMissionId];if(!profile)return;
+  mission.profileId=selectedMissionId;
+  MISSION_CHECKPOINTS=profile.checkpoints.map(point=>({...point}));
+  selectWorldMap(profile.map,false);
+  setMissionPanel(false,false);
+  startLesson("mission");
+  showMessage(`${profile.title} · ${WEATHER_PRESETS[weatherMode].label} · 이륙 후 GATE 1로 향하세요.`,false,6500);
+  $("pause-button").focus({preventScroll:true});
 }
 
 function selectWorldMap(map,notify=true) {
@@ -2091,6 +2153,7 @@ function selectWeather(mode,notify=true) {
   $("flight").dataset.weather=mode;
   $("weather-button").textContent=`날씨 · ${WEATHER_PRESETS[mode].label}`;
   document.querySelectorAll("[data-weather]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.weather===mode)));
+  if($("mission-weather")) $("mission-weather").textContent=`현재 날씨 · ${WEATHER_PRESETS[mode].label}`;
   if(notify) {
     setWeatherPanel(false);
     const wind=WEATHER_PRESETS[mode].wind>=.4?" · 강한 돌풍":WEATHER_PRESETS[mode].wind>=.2?" · 약한 돌풍":"";
@@ -2108,7 +2171,10 @@ $("reset-button").addEventListener("click", () => {
 $("free-flight-button").addEventListener("click", () => startLesson("free"));
 $("takeoff-button").addEventListener("click", () => startLesson("takeoff"));
 $("approach-button").addEventListener("click", () => startLesson("landing"));
-$("mission-button").addEventListener("click", () => startLesson("mission"));
+$("mission-button").addEventListener("click", () => setMissionPanel($("mission-panel").hidden));
+$("mission-close-button").addEventListener("click",()=>setMissionPanel(false));
+document.querySelectorAll("[data-mission]").forEach(button=>button.addEventListener("click",()=>selectMissionCard(button.dataset.mission)));
+$("mission-start-button").addEventListener("click",beginSelectedMission);
 $("retry-button").addEventListener("click", () => { startLesson(lesson.mode); $("pause-button").focus(); });
 function togglePause() { if (!lesson.result) { lesson.paused = !lesson.paused; updateHud(); } }
 function toggleBrake() { if (lesson.mode !== "free" && !lesson.result && lesson.phase !== "airborne") { lesson.brake = !lesson.brake; updateHud(); } }
@@ -2125,6 +2191,7 @@ document.addEventListener("pointerdown",ensureAudio,{once:true});
 document.addEventListener("keydown", event => {
   if(event.code==="Escape"&&!$("map-panel").hidden){event.preventDefault();setMapPanel(false);return;}
   if(event.code==="Escape"&&!$("weather-panel").hidden){event.preventDefault();setWeatherPanel(false);return;}
+  if(event.code==="Escape"&&!$("mission-panel").hidden){event.preventDefault();setMissionPanel(false);return;}
   if (event.repeat || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName) || event.target.isContentEditable) return;
   if (event.code === "KeyP") { event.preventDefault(); togglePause(); }
   if (event.code === "KeyB") { event.preventDefault(); toggleBrake(); }
@@ -2166,7 +2233,7 @@ document.addEventListener("visibilitychange",() => {
 });
 window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
 new ResizeObserver(resizeCanvas).observe(canvas);
-selectWorldMap(worldMap,false);selectWeather(weatherMode,false);resizeCanvas();updateHud();requestAnimationFrame(animate);
+selectWorldMap(worldMap,false);selectWeather(weatherMode,false);selectMissionCard(selectedMissionId);refreshMissionBests();resizeCanvas();updateHud();requestAnimationFrame(animate);
 if (window.location.protocol === "file:") {
   $("local-server-link").hidden = false;
   showMessage("파일을 직접 열었습니다. 아래 버튼으로 로컬 서버에서 열거나 VS Code Live Server를 사용해주세요.", true);
