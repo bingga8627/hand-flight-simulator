@@ -78,6 +78,15 @@ const TERRAIN_TEXTURE_URLS = {
   "desert-base":"assets/terrain/terrain-desert.png",
   "night-city":"assets/terrain/terrain-night.png"
 };
+const CESIUM_VERSION="1.105";
+const CESIUM_BASE_URL=`https://ajax.googleapis.com/ajax/libs/cesiumjs/${CESIUM_VERSION}/Build/Cesium/`;
+// 각 테마를 실제 지역에 연결합니다. baseHeight는 3D 타일의 지표 높이를 얻기 전 사용하는 안전한 초기값(m)입니다.
+const EARTH_LOCATIONS = {
+  "mountain-city":{label:"인스브루크",lat:47.2602,lon:11.3439,baseHeight:590},
+  "ocean-islands":{label:"제주 해안",lat:33.4982,lon:126.4912,baseHeight:85},
+  "desert-base":{label:"라스베이거스 사막",lat:36.1548,lon:-115.073,baseHeight:650},
+  "night-city":{label:"서울 도심",lat:37.5665,lon:126.978,baseHeight:85}
+};
 const WEATHER_PRESETS = {
   clear:{label:"맑음",clouds:1,haze:0,wind:.08},
   sunset:{label:"석양",clouds:1.25,haze:.08,wind:.12,sky:["#162844","#a64f50","#f2a561"],sunset:true},
@@ -114,6 +123,11 @@ let connectionStage = "idle";
 let worldMap = (()=>{try{const saved=localStorage.getItem("aeronaut-map");return MAP_THEMES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
 let weatherMode = (()=>{try{const saved=localStorage.getItem("aeronaut-weather");return WEATHER_PRESETS[saved]?saved:"clear";}catch{return "clear";}})();
 let selectedMissionId = (()=>{try{const saved=localStorage.getItem("aeronaut-mission");return MISSION_PROFILES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
+const realEarth={
+  enabled:false,viewer:null,tileset:null,loading:false,libraryPromise:null,activeKey:"",groundHeights:{},
+  key:(()=>{try{return localStorage.getItem("aeronaut-google-map-key")||"";}catch{return "";}})(),
+  restore:(()=>{try{return localStorage.getItem("aeronaut-real-earth")==="true";}catch{return false;}})()
+};
 const terrainTextures={};
 function terrainTexture(map) {
   if(terrainTextures[map])return terrainTextures[map];
@@ -130,6 +144,118 @@ const radians = (degrees) => degrees * Math.PI / 180;
 const degrees = (radiansValue) => radiansValue * 180 / Math.PI;
 const signed = (v, digits = 1) => `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
 const angleDifference = (a, b) => ((a - b + 540) % 360) - 180;
+
+function setEarthStatus(message,type="") {
+  const status=$("earth-status");status.textContent=message;status.className=`earth-status${type?` ${type}`:""}`;
+}
+
+// Cesium은 실제 지형을 켤 때만 내려받아 기존 Canvas 모드의 초기 로딩을 무겁게 만들지 않습니다.
+function loadCesiumLibrary() {
+  if(window.Cesium)return Promise.resolve(window.Cesium);
+  if(realEarth.libraryPromise)return realEarth.libraryPromise;
+  window.CESIUM_BASE_URL=CESIUM_BASE_URL;
+  realEarth.libraryPromise=new Promise((resolve,reject)=>{
+    const script=document.createElement("script");
+    const timeout=setTimeout(()=>reject(new Error("Cesium 로딩 시간이 초과되었습니다.")),30000);
+    script.src=`${CESIUM_BASE_URL}Cesium.js`;script.async=true;
+    script.onload=()=>{clearTimeout(timeout);window.Cesium?resolve(window.Cesium):reject(new Error("Cesium 전역 객체를 찾을 수 없습니다."));};
+    script.onerror=()=>{clearTimeout(timeout);reject(new Error("Cesium CDN을 불러오지 못했습니다."));};
+    document.head.appendChild(script);
+  }).catch(error=>{realEarth.libraryPromise=null;throw error;});
+  return realEarth.libraryPromise;
+}
+
+function destroyEarthViewer() {
+  if(realEarth.viewer&&!realEarth.viewer.isDestroyed())realEarth.viewer.destroy();
+  realEarth.viewer=null;realEarth.tileset=null;realEarth.activeKey="";
+  $("cesium-container").replaceChildren();
+}
+
+async function createEarthViewer(apiKey) {
+  const Cesium=await loadCesiumLibrary();
+  if(realEarth.viewer&&realEarth.activeKey===apiKey)return realEarth.viewer;
+  destroyEarthViewer();
+  Cesium.RequestScheduler.requestsByServer["tile.googleapis.com:443"]=18;
+  const viewer=new Cesium.Viewer("cesium-container",{
+    imageryProvider:false,baseLayerPicker:false,geocoder:false,homeButton:false,sceneModePicker:false,
+    navigationHelpButton:false,animation:false,timeline:false,fullscreenButton:false,infoBox:false,
+    selectionIndicator:false,requestRenderMode:true,maximumRenderTimeChange:Infinity
+  });
+  viewer.scene.globe.show=false;
+  viewer.scene.backgroundColor=Cesium.Color.fromCssColorString("#07121a");
+  viewer.scene.screenSpaceCameraController.enableInputs=false;
+  viewer.scene.fog.enabled=true;viewer.scene.fog.density=.00012;
+  // 타일 메타데이터 요청이 실패해도 catch에서 WebGL 뷰어까지 확실히 정리할 수 있도록 먼저 보관합니다.
+  realEarth.viewer=viewer;realEarth.activeKey=apiKey;
+  const tileset=await Cesium.Cesium3DTileset.fromUrl(
+    `https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(apiKey)}`,{
+    showCreditsOnScreen:true,maximumScreenSpaceError:12,dynamicScreenSpaceError:true
+  });
+  viewer.scene.primitives.add(tileset);
+  realEarth.tileset=tileset;
+  return viewer;
+}
+
+async function enableRealEarth() {
+  const apiKey=$("google-api-key").value.trim();
+  if(!apiKey){setEarthStatus("Google Maps Tile API 키를 입력해주세요.","error");$("google-api-key").focus();return;}
+  if(realEarth.loading)return;
+  realEarth.loading=true;$("earth-enable-button").disabled=true;setEarthStatus("Cesium과 Google 3D 지형을 불러오는 중입니다…");
+  // 숨겨진 요소는 WebGL 크기를 계산할 수 없으므로 초기화 중에도 뒤쪽에서 컨테이너를 열어 둡니다.
+  $("cesium-container").hidden=false;
+  try {
+    await createEarthViewer(apiKey);
+    realEarth.key=apiKey;realEarth.enabled=true;
+    try{localStorage.setItem("aeronaut-google-map-key",apiKey);localStorage.setItem("aeronaut-real-earth","true");}catch{}
+    $("cesium-container").hidden=false;$("flight").classList.add("real-earth");
+    $("earth-button").textContent="실제 지형 ON";$("earth-button").setAttribute("aria-pressed","true");
+    setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[worldMap].label} 실제 3D 지형`,"active");
+    realEarth.viewer.resize();syncRealEarthCamera(true);sampleEarthGroundHeight(worldMap);setEarthPanel(false,false);
+    showMessage(`Google 실제 지형 연결 · ${EARTH_LOCATIONS[worldMap].label}`,false,4500);
+  } catch(error) {
+    console.error("실제 지형 초기화 실패",error);
+    realEarth.enabled=false;destroyEarthViewer();$("cesium-container").hidden=true;$("flight").classList.remove("real-earth");
+    $("earth-button").textContent="실제 지형 오류";$("earth-button").setAttribute("aria-pressed","false");
+    setEarthStatus(`연결 실패 · ${error?.message||"API 키와 Map Tiles API 설정을 확인해주세요."}`,"error");
+  } finally {realEarth.loading=false;$("earth-enable-button").disabled=false;}
+}
+
+function sampleEarthGroundHeight(map) {
+  const Cesium=window.Cesium,viewer=realEarth.viewer,location=EARTH_LOCATIONS[map];
+  if(!Cesium||!viewer||viewer.isDestroyed()||typeof viewer.scene.sampleHeightMostDetailed!=="function")return;
+  const point=Cesium.Cartographic.fromDegrees(location.lon,location.lat);
+  viewer.scene.sampleHeightMostDetailed([point]).then(updated=>{
+    const height=updated?.[0]?.height;
+    if(Number.isFinite(height)){realEarth.groundHeights[map]=height;syncRealEarthCamera(true);}
+  }).catch(()=>{});
+}
+
+function disableRealEarth(notify=true) {
+  realEarth.enabled=false;realEarth.restore=false;
+  try{localStorage.setItem("aeronaut-real-earth","false");}catch{}
+  $("cesium-container").hidden=true;$("flight").classList.remove("real-earth");
+  $("earth-button").textContent="실제 지형 OFF";$("earth-button").setAttribute("aria-pressed","false");
+  setEarthStatus("Canvas 배경을 사용 중입니다. 저장된 키로 언제든 다시 연결할 수 있습니다.");
+  if(notify){setEarthPanel(false,false);showMessage("Canvas 배경으로 돌아왔습니다.",false,3500);}
+}
+
+function syncRealEarthCamera(force=false) {
+  if(!realEarth.enabled||!realEarth.viewer||realEarth.viewer.isDestroyed())return;
+  const Cesium=window.Cesium,location=EARTH_LOCATIONS[worldMap];if(!Cesium||!location)return;
+  const runwayHeading=radians(RUNWAY.heading),east=Math.sin(runwayHeading)*lesson.z+Math.cos(runwayHeading)*lesson.x;
+  const north=Math.cos(runwayHeading)*lesson.z-Math.sin(runwayHeading)*lesson.x;
+  const latitude=location.lat+north/110540;
+  const longitude=location.lon+east/(111320*Math.cos(radians(location.lat)));
+  const ground=realEarth.groundHeights[worldMap]??location.baseHeight;
+  const altitude=ground+Math.max(lesson.phase==="ground"?7:4,flight.altitude*FEET_TO_METERS+4);
+  realEarth.viewer.camera.setView({
+    destination:Cesium.Cartesian3.fromDegrees(longitude,latitude,altitude),
+    orientation:{heading:Cesium.Math.toRadians(flight.heading),pitch:Cesium.Math.toRadians(clamp(flight.pitch,-35,30)),roll:Cesium.Math.toRadians(flight.roll)}
+  });
+  const weather=WEATHER_PRESETS[weatherMode];
+  realEarth.viewer.scene.fog.density=weather.fog?.0009:weather.rain?.00028:weather.overcast?.00018:.0001;
+  if(force||realEarth.viewer.scene.requestRenderMode)realEarth.viewer.scene.requestRender();
+}
 
 // 외부 음원 파일 없이 Web Audio 노드만 사용합니다. 브라우저 정책상 첫 사용자 입력 뒤에 시작됩니다.
 function ensureAudio() {
@@ -1084,6 +1210,7 @@ function path(points, fill, stroke) {
 function drawWorld(now) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
+  if(realEarth.enabled){drawRealEarthCanvas(now);return;}
   ctx.save();
   ctx.translate(width / 2, height * 0.46);
   // 오른쪽으로 기울이면 외부 수평선은 반시계 방향으로 회전합니다.
@@ -1143,6 +1270,23 @@ function drawWorld(now) {
   drawWindStreaks(now);
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointNavigator();
   if (lesson.mode === "mission") drawGatePassEffect(now);
+}
+
+// 실제 지형 모드에서는 배경을 칠하지 않고 기존 Canvas의 훈련 표식과 날씨 효과만 투명하게 겹칩니다.
+function drawRealEarthCanvas(now) {
+  // 실제 주간 영상인 타일 위에도 야간 맵의 색조를 유지해 HUD와 날씨가 자연스럽게 이어지게 합니다.
+  if(worldMap==="night-city"){
+    ctx.save();ctx.fillStyle="rgba(2,9,22,.48)";ctx.fillRect(0,0,width,height);ctx.restore();
+  }
+  ctx.save();ctx.translate(width/2,height*.46);ctx.rotate(-radians(flight.roll));
+  ctx.translate(0,flight.pitch*height*.012);
+  if(lesson.mode!=="free")drawRunway();
+  if(lesson.mode==="mission"&&!mission.returning)drawCheckpointRings();
+  drawPitchLadder();ctx.restore();
+  drawWeatherEffects(now,WEATHER_PRESETS[weatherMode]);
+  drawWindStreaks(now);
+  if(lesson.mode==="mission"&&!mission.returning)drawCheckpointNavigator();
+  if(lesson.mode==="mission")drawGatePassEffect(now);
 }
 
 // 여러 개의 반투명 타원과 음영을 겹쳐 납작한 구름 대신 부피 있는 구름층을 만듭니다.
@@ -2309,6 +2453,7 @@ function animate(now) {
   trackHands(now);
   updateFlight(dt,now);
   updateFlightEffects(now);
+  syncRealEarthCamera();
   drawWorld(now);drawCockpit(now);drawFlightDirector();drawStick();
   updateEngineSound();
   if(now-lastHud>100){updateHud();lastHud=now;}
@@ -2318,14 +2463,27 @@ function animate(now) {
 function setMapPanel(open) {
   if(open) setWeatherPanel(false,false);
   if(open) setMissionPanel(false,false);
+  if(open) setEarthPanel(false,false);
   $("map-panel").hidden=!open;
   $("map-button").setAttribute("aria-expanded",String(open));
   if(open) $("map-panel").querySelector(`[data-map="${worldMap}"]`)?.focus();
   else $("map-button").focus({preventScroll:true});
 }
 
+function setEarthPanel(open,restoreFocus=true) {
+  if(open) {
+    setWeatherPanel(false,false);setMissionPanel(false,false);
+    if(!$('map-panel').hidden){$('map-panel').hidden=true;$('map-button').setAttribute('aria-expanded','false');}
+    $("google-api-key").value=realEarth.key;
+    if(realEarth.enabled)setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[worldMap].label} 실제 3D 지형`,"active");
+  }
+  $("earth-panel").hidden=!open;$("earth-button").setAttribute("aria-expanded",String(open));
+  if(open)$("google-api-key").focus();else if(restoreFocus)$("earth-button").focus({preventScroll:true});
+}
+
 function setWeatherPanel(open,restoreFocus=true) {
   if(open) setMissionPanel(false,false);
+  if(open) setEarthPanel(false,false);
   if(open&&$("map-panel")&&!$("map-panel").hidden) {
     $("map-panel").hidden=true;$("map-button").setAttribute("aria-expanded","false");
   }
@@ -2355,6 +2513,7 @@ function setMissionPanel(open,restoreFocus=true) {
   if(open) {
     if(!$("map-panel").hidden){$("map-panel").hidden=true;$("map-button").setAttribute("aria-expanded","false");}
     if(!$("weather-panel").hidden){$("weather-panel").hidden=true;$("weather-button").setAttribute("aria-expanded","false");}
+    if(!$("earth-panel").hidden){$("earth-panel").hidden=true;$("earth-button").setAttribute("aria-expanded","false");}
     selectMissionCard(selectedMissionId);
     refreshMissionBests();
   }
@@ -2393,9 +2552,10 @@ function selectWorldMap(map,notify=true) {
   $("flight").dataset.map=map;
   $("map-button").textContent=`맵 · ${MAP_THEMES[map].label}`;
   document.querySelectorAll("[data-map]").forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.map===map)));
+  if(realEarth.enabled){syncRealEarthCamera(true);sampleEarthGroundHeight(map);setEarthStatus(`연결됨 · ${EARTH_LOCATIONS[map].label} 실제 3D 지형`,"active");}
   if(notify) {
     setMapPanel(false);
-    showMessage(`${MAP_THEMES[map].label} 맵으로 변경했습니다.`,false,3500);
+    showMessage(realEarth.enabled?`${EARTH_LOCATIONS[map].label} 실제 지역으로 이동했습니다.`:`${MAP_THEMES[map].label} 맵으로 변경했습니다.`,false,3500);
   }
 }
 
@@ -2437,11 +2597,20 @@ $("audio-button").addEventListener("click",() => setSoundMuted(!sound.muted));
 $("map-button").addEventListener("click",()=>setMapPanel($("map-panel").hidden));
 $("map-close-button").addEventListener("click",()=>setMapPanel(false));
 document.querySelectorAll("[data-map]").forEach(button=>button.addEventListener("click",()=>selectWorldMap(button.dataset.map)));
+$("earth-button").addEventListener("click",()=>setEarthPanel($("earth-panel").hidden));
+$("earth-close-button").addEventListener("click",()=>setEarthPanel(false));
+$("earth-enable-button").addEventListener("click",enableRealEarth);
+$("earth-disable-button").addEventListener("click",()=>disableRealEarth());
+$("earth-toggle-key").addEventListener("click",()=>{
+  const input=$("google-api-key"),show=input.type==="password";input.type=show?"text":"password";
+  $("earth-toggle-key").textContent=show?"숨기기":"보기";input.focus();
+});
 $("weather-button").addEventListener("click",()=>setWeatherPanel($("weather-panel").hidden));
 $("weather-close-button").addEventListener("click",()=>setWeatherPanel(false));
 document.querySelectorAll("[data-weather]").forEach(button=>button.addEventListener("click",()=>selectWeather(button.dataset.weather)));
 document.addEventListener("pointerdown",ensureAudio,{once:true});
 document.addEventListener("keydown", event => {
+  if(event.code==="Escape"&&!$("earth-panel").hidden){event.preventDefault();setEarthPanel(false);return;}
   if(event.code==="Escape"&&!$("map-panel").hidden){event.preventDefault();setMapPanel(false);return;}
   if(event.code==="Escape"&&!$("weather-panel").hidden){event.preventDefault();setWeatherPanel(false);return;}
   if(event.code==="Escape"&&!$("mission-panel").hidden){event.preventDefault();setMissionPanel(false);return;}
@@ -2484,9 +2653,11 @@ document.addEventListener("visibilitychange",() => {
   clearHands(); lastFrame=0;
   if (document.hidden && lesson.mode !== "free" && !lesson.result) lesson.paused = true;
 });
-window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
+window.addEventListener("pagehide",() => {stopCamera();landmarker?.close();landmarker=null;sound.context?.close();destroyEarthViewer();if("speechSynthesis" in window)window.speechSynthesis.cancel();});
 new ResizeObserver(resizeCanvas).observe(canvas);
+$("google-api-key").value=realEarth.key;
 selectWorldMap(worldMap,false);selectWeather(weatherMode,false);selectMissionCard(selectedMissionId);refreshMissionBests();resizeCanvas();updateHud();requestAnimationFrame(animate);
+if(realEarth.restore&&realEarth.key)enableRealEarth();
 if (window.location.protocol === "file:") {
   $("local-server-link").hidden = false;
   showMessage("파일을 직접 열었습니다. 아래 버튼으로 로컬 서버에서 열거나 VS Code Live Server를 사용해주세요.", true);
