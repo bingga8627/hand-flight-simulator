@@ -71,6 +71,13 @@ const MAP_THEMES = {
   "desert-base": {label:"사막 기지",sky:["#244e67","#7798a0","#e6c692"],ground:["#ad895d","#8a613f","#513a2b"],mountain:["#7a4e3d88","#a36b4899"],grid:"226,190,126",road:"#59483caa",crossRoad:"#665044aa",buildings:["#806955","#6d5b4b","#584b40"],roof:"#aa9270",side:"#493e35bb",window:"#f1c66f",cloud:"239,221,188",desert:true},
   "night-city": {label:"야간 도시",sky:["#020712","#102337","#294252"],ground:["#13252b","#0b1d22","#040d12"],mountain:["#0b172566","#172b3299"],grid:"81,142,133",road:"#142b32cc",crossRoad:"#18323acc",buildings:["#1a3440","#142a37","#0d222e"],roof:"#34515a",side:"#081722dd",window:"#d7ef8b",cloud:"111,139,151",night:true}
 };
+// 생성형 이미지 자산은 장식용 지면층으로만 사용합니다. 로딩 전이나 실패 시에는 기존 절차 지형이 그대로 표시됩니다.
+const TERRAIN_TEXTURE_URLS = {
+  "mountain-city":"assets/terrain/terrain-mountain.png",
+  "ocean-islands":"assets/terrain/terrain-ocean.png",
+  "desert-base":"assets/terrain/terrain-desert.png",
+  "night-city":"assets/terrain/terrain-night.png"
+};
 const WEATHER_PRESETS = {
   clear:{label:"맑음",clouds:1,haze:0,wind:.08},
   sunset:{label:"석양",clouds:1.25,haze:.08,wind:.12,sky:["#162844","#a64f50","#f2a561"],sunset:true},
@@ -107,6 +114,12 @@ let connectionStage = "idle";
 let worldMap = (()=>{try{const saved=localStorage.getItem("aeronaut-map");return MAP_THEMES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
 let weatherMode = (()=>{try{const saved=localStorage.getItem("aeronaut-weather");return WEATHER_PRESETS[saved]?saved:"clear";}catch{return "clear";}})();
 let selectedMissionId = (()=>{try{const saved=localStorage.getItem("aeronaut-mission");return MISSION_PROFILES[saved]?saved:"mountain-city";}catch{return "mountain-city";}})();
+const terrainTextures={};
+function terrainTexture(map) {
+  if(terrainTextures[map])return terrainTextures[map];
+  const image=new Image();image.decoding="async";image.src=TERRAIN_TEXTURE_URLS[map];
+  terrainTextures[map]=image;return image;
+}
 // 기준 위치는 현재 카메라 연결 동안만 유지합니다. 이미지나 랜드마크는 저장하지 않습니다.
 const calibration = { active: false, neutral: null, palmScale: null, palmShape: null, started: 0, held: 0, lastSample: 0, reference: null, referenceScale: null, sumScale: 0, sumShape: 0, sumX: 0, sumY: 0, count: 0, note: "이지 조종은 손을 보여주면 자동으로 시작합니다. C 키는 표시 중심을 맞출 때만 사용합니다." };
 
@@ -1093,6 +1106,7 @@ function drawWorld(now) {
   if(worldMap==="mountain-city"||worldMap==="night-city") drawDistantSkyline(extent,theme);
 
   drawCloudField(theme,now,weather);
+  drawTerrainImage(theme,extent);
   drawRegionalGround(theme);
   drawTerrainTexture(theme);
 
@@ -1222,6 +1236,44 @@ function sceneryNoise(value) {
   return wave-Math.floor(wave);
 }
 
+// 한 장의 항공 지형 텍스처를 여러 가로 띠로 잘라 간단한 원근 지면으로 만듭니다.
+// Canvas 2D만 사용하지만 수평선 쪽 띠는 좁고 가까운 띠는 넓어져 비행 중 지면이 아래로 흐릅니다.
+function drawTerrainImage(theme,extent) {
+  // 선택한 맵만 내려받아 첫 접속에서 네 장의 큰 이미지를 동시에 요청하지 않습니다.
+  const image=terrainTexture(worldMap);
+  if(!image||!image.complete||!image.naturalWidth)return;
+  const slices=28,sourceHeight=image.naturalHeight/slices;
+  const forward=((lesson.z*.16+flight.distance*2600)%image.naturalHeight+image.naturalHeight)%image.naturalHeight;
+  const lateral=((lesson.x*.13+angleDifference(flight.heading,RUNWAY.heading)*4.2)%image.naturalWidth+image.naturalWidth)%image.naturalWidth;
+  const horizontalPhase=lateral/image.naturalWidth;
+  ctx.save();
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  ctx.globalAlpha=worldMap==="night-city"?.52:worldMap==="ocean-islands"?.62:.50;
+  ctx.globalCompositeOperation=theme.night?"screen":"soft-light";
+  for(let index=0;index<slices;index++) {
+    const near=index/slices,far=(index+1)/slices;
+    const yNear=near*near*height*1.85,yFar=far*far*height*1.85+1;
+    const nearHalf=width*(.08+near*.88),farHalf=width*(.08+far*.88);
+    const sourceY=(forward+index*sourceHeight)%image.naturalHeight;
+    const safeHeight=Math.min(sourceHeight+2,image.naturalHeight-sourceY);
+    if(safeHeight<=0)continue;
+    ctx.save();
+    ctx.beginPath();ctx.moveTo(-nearHalf,yNear);ctx.lineTo(nearHalf,yNear);
+    ctx.lineTo(farHalf,yFar);ctx.lineTo(-farHalf,yFar);ctx.closePath();ctx.clip();
+    const stripWidth=farHalf*2,shift=horizontalPhase*stripWidth;
+    for(let tile=-1;tile<=1;tile++) {
+      ctx.drawImage(image,0,sourceY,image.naturalWidth,safeHeight,-farHalf-shift+tile*stripWidth,yNear,stripWidth,yFar-yNear+2);
+    }
+    ctx.restore();
+  }
+  // 가까운 곳의 명암을 정리해 조종석 바로 앞에서 텍스처가 과도하게 밝아지지 않게 합니다.
+  const shade=ctx.createLinearGradient(0,0,0,height*1.4);
+  shade.addColorStop(0,"#08171b00");shade.addColorStop(.58,"#06131818");shade.addColorStop(1,"#02090db0");
+  ctx.globalCompositeOperation="source-over";ctx.globalAlpha=1;ctx.fillStyle=shade;
+  ctx.fillRect(-extent,0,extent*2,height*1.4);
+  ctx.restore();
+}
+
 // 태양·달·수평선 안개를 더해 각 맵의 시간대와 대기감을 분명하게 만듭니다.
 function drawSkyDetails(extent,theme,now,weather) {
   ctx.save();
@@ -1281,9 +1333,9 @@ function drawRegionalGround(theme) {
   }
 
   const palettes=theme.desert
-    ?["#b1875a","#9c734e","#c09965","#7d593f"]
-    :theme.night?["#142b2d","#102326","#1b3433","#0b1d22"]
-      :["#58745c","#6f8665","#496b58","#81906a"];
+    ?["#b1875a88","#9c734e82","#c0996588","#7d593f82"]
+    :theme.night?["#142b2d88","#10232688","#1b343388","#0b1d2288"]
+      :["#58745c80","#6f86657d","#496b587d","#81906a78"];
   for(let row=-6;row<15;row++) for(let column=-5;column<=5;column++) {
     if(Math.abs(column)<1)continue;
     const seed=(baseZ/480+row)*17.1+column*4.7;
@@ -1298,8 +1350,8 @@ function drawRegionalGround(theme) {
   }
 
   if(lesson.mode!=="free") {
-    const outer=theme.desert?"#8c7359":theme.night?"#172b2d":"#5d765f";
-    const inner=theme.desert?"#aa8b63":theme.night?"#203738":"#71866b";
+    const outer=theme.desert?"#8c7359d8":theme.night?"#172b2ddd":"#5d765fd5";
+    const inner=theme.desert?"#aa8b63e6":theme.night?"#203738e8":"#71866be2";
     drawGroundPolygon(irregularAirfieldPolygon(0),outer,theme.night?"#78948855":"#d2d9b144");
     drawGroundPolygon(irregularAirfieldPolygon(42),inner);
     drawAirportInfrastructure(theme.desert?"#64584d":"#485d58",theme.desert?"#9e9485":"#7e8c82");
