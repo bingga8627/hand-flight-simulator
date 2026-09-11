@@ -1,6 +1,6 @@
 # AERONAUT — 웹캠 손동작 비행 시뮬레이터
 
-HTML, CSS, JavaScript와 Canvas 2D로 만든 1인칭 비행 프로토타입입니다. MediaPipe Hand Landmarker로 최대 두 손을 추적합니다. 기본 Canvas 배경은 npm 설치나 빌드 없이 동작하며, 선택 기능으로 CesiumJS와 Google Photorealistic 3D Tiles 실제 지형을 사용할 수 있습니다.
+HTML, CSS, JavaScript와 Canvas 2D로 만든 1인칭 비행 프로토타입입니다. MediaPipe Hand Landmarker로 최대 두 손을 추적합니다. 기본 Canvas 배경은 npm 설치나 빌드 없이 동작하며, 선택 기능으로 MapLibre와 OpenFreeMap의 무료 실제 지도 배경을 사용할 수 있습니다.
 
 ## 파일
 
@@ -163,16 +163,11 @@ Web Audio API로 저음 엔진 진동, 터빈 휘파람, 저역 흡기음과 고
 - **사막 기지**: 황갈색 산맥, 낮은 격납고형 건물과 기지 도로
 - **야간 도시**: 별이 보이는 밤하늘, 어두운 빌딩, 밝은 창문과 도로등
 
-### Google 실제 지형 (선택 기능)
+### 무료 실제 지도 (선택 기능)
 
-상단의 **실제 지형**을 누르면 Google Photorealistic 3D Tiles를 CesiumJS로 표시할 수 있습니다. 산악 도시는 인스브루크, 바다와 섬은 제주, 사막 기지는 라스베이거스, 야간 도시는 서울의 실제 위치로 연결됩니다. 비행 HUD, 훈련 활주로, 게이트와 날씨 효과는 투명 Canvas로 실제 지형 위에 계속 표시됩니다.
+상단의 **무료 지도**를 누르고 **무료 지도 켜기**를 선택하면 OpenStreetMap 데이터를 OpenFreeMap과 MapLibre GL JS로 표시합니다. 가입, 결제, API 키가 필요하지 않습니다. 산악 도시는 인스브루크, 바다와 섬은 제주, 사막 기지는 라스베이거스, 야간 도시는 서울의 실제 위치로 연결됩니다. 도로와 토지 이용 정보, 건물 높이 데이터가 있는 지역의 3D 건물을 낮게 기울인 비행 시점으로 보여줍니다.
 
-1. Google Cloud 프로젝트에서 결제 계정을 연결하고 **Map Tiles API**를 활성화합니다.
-2. API 키를 만들고 애플리케이션 제한을 **웹사이트(HTTP referrer)**로 설정합니다.
-3. 로컬 실행 주소(`localhost` 또는 `127.0.0.1`)와 배포 주소(`bingga8627.github.io`)를 허용 목록에 추가합니다.
-4. 앱의 **실제 지형** 설정창에 키를 입력하고 **저장하고 실제 지형 켜기**를 누릅니다.
-
-키는 현재 브라우저의 `localStorage`에만 저장되고 Git 저장소에는 기록되지 않습니다. 실제 지형을 끄면 즉시 기존 Canvas 배경으로 돌아갑니다. 연결 실패 시에도 비행과 손 추적은 멈추지 않고 Canvas 배경을 유지합니다. Google 타일 사용에는 계정의 할당량과 요금이 적용되므로 [Map Tiles API 사용 및 결제 안내](https://developers.google.com/maps/documentation/tile/usage-and-billing)를 확인하세요. 앱은 Google의 화면상 저작권 표시가 보이도록 Cesium의 `showCreditsOnScreen` 옵션을 유지합니다. 자세한 설정은 [Photorealistic 3D Tiles 공식 가이드](https://developers.google.com/maps/documentation/tile/3d-tiles)를 참고하세요.
+이 모드는 항공사진이 아닌 실제 지도 데이터 기반의 3D 벡터 지도입니다. 비행 HUD, 훈련 활주로, 게이트와 날씨 효과는 투명 Canvas로 지도 위에 계속 표시됩니다. 지도를 끄면 즉시 기존 Canvas 배경으로 돌아가며, 첫 연결에 실패해도 비행과 손 추적은 Canvas 배경에서 계속 동작합니다. 지도 하단에는 OpenFreeMap, OpenMapTiles, OpenStreetMap 저작권 표시가 자동으로 나타납니다. 서비스 설명과 이용 방법은 [OpenFreeMap 공식 안내](https://openfreemap.org/)와 [빠른 시작 가이드](https://openfreemap.org/quick_start/)를 참고하세요.
 
 상단의 **날씨** 버튼에서는 맑음, 석양, 흐림, 비, 안개를 선택할 수 있습니다. 날씨도 브라우저에 저장됩니다. 석양은 낮은 태양과 따뜻한 산란광, 흐림은 낮고 짙은 구름층, 비는 빗줄기와 조종석 유리 물방울, 안개는 움직이는 안개 띠와 짧은 시정을 적용합니다. 흐림과 비에는 약한 돌풍이 적용되며 손 조종을 방해하지 않는 범위에서 방위와 Roll이 조금 흔들립니다.
 
