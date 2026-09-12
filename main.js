@@ -1483,6 +1483,7 @@ function drawRegionalGround(theme) {
       drawGroundPolygon(irregularAirfieldPolygon(24),"#52755a","#8aa87988");
       drawGroundPolygon(irregularAirfieldPolygon(68),"#638363");
       drawAirportInfrastructure("#56675f","#899086");
+      drawAirportEnvironment(theme);
     }
     return;
   }
@@ -1513,6 +1514,7 @@ function drawRegionalGround(theme) {
     drawGroundPolygon(irregularAirfieldPolygon(0),outer,theme.night?"#78948855":"#d2d9b144");
     drawGroundPolygon(irregularAirfieldPolygon(42),inner);
     drawAirportInfrastructure(theme.desert?"#64584d":"#485d58",theme.desert?"#9e9485":"#7e8c82");
+    drawAirportEnvironment(theme);
   }
 
   if(!hasTexture&&worldMap==="mountain-city") drawRiverAndForest(baseZ,false);
@@ -1530,6 +1532,114 @@ function drawAirportInfrastructure(taxiway,apron) {
   runwayRectangle(-222,448,-104,854,"#26383b66");runwayRectangle(104,1278,219,1692,"#26383b66");
   for(let z=500;z<830;z+=82) drawGroundEllipse(-166,z,26,13,"#c4c89f3d");
   for(let z=1330;z<1680;z+=82) drawGroundEllipse(160,z,26,13,"#c4c89f3d");
+  // 유도로 중앙선과 정지선은 지상 활주 때 공항의 구조를 읽기 쉽게 합니다.
+  runwayRectangle(-70,-40,-69,RUNWAY.length+70,"#e6c861aa");
+  runwayRectangle(69,-40,70,RUNWAY.length+70,"#e6c861aa");
+  for(const z of [170,620,1120,1660,2050]) {
+    runwayRectangle(-82,z+7,-29,z+9,"#e6c8618a");runwayRectangle(29,z+7,82,z+9,"#e6c8618a");
+  }
+}
+
+// 평면 활주로만 남지 않도록 공항 주변의 입체 시설과 자연 지표를 월드 좌표에 배치합니다.
+function drawAirportEnvironment(theme) {
+  const night=theme.night,desert=theme.desert,ocean=worldMap==="ocean-islands";
+  const fieldColors=desert?["#8c6e4c45","#b08a5940","#6f543d38"]
+    :night?["#10272850","#18333042","#0c202348"]
+      :ocean?["#315f544d","#52785c46","#284e4940"]:["#42644d48","#6c815844","#35584645"];
+
+  // 가장자리가 조금씩 어긋난 토지 구획을 활주로 바깥에 배치해 빈 단색 면을 없앱니다.
+  for(let row=0;row<7;row++) for(const side of [-1,1]) {
+    const seed=row*9.37+side*23.4;
+    const z=-180+row*410+sceneryNoise(seed)*100;
+    const inner=190+sceneryNoise(seed+2.6)*55;
+    const outer=inner+220+sceneryNoise(seed+7.1)*210;
+    const skew=(sceneryNoise(seed+4.4)-.5)*70;
+    drawGroundPolygon([
+      [side*inner,z],[side*outer,z+skew],[side*(outer+35),z+340],[side*(inner+12),z+365]
+    ],fieldColors[(row+(side>0?1:0))%fieldColors.length],night?"#6b8b7a12":"#d4d2a318");
+  }
+
+  // 서비스 도로, 배수로와 공항 경계가 활주로 방향으로 이어집니다.
+  const service=desert?"#5d50445f":night?"#0a181f88":"#33494768";
+  for(const side of [-1,1]) {
+    runwayRectangle(side*132,-260,side*143,RUNWAY.length+320,service);
+    runwayRectangle(side*148,-260,side*151,RUNWAY.length+320,night?"#73908126":"#b5c1a52c");
+    for(let z=-40;z<RUNWAY.length+180;z+=115) {
+      drawProjectedPole(side*168,z,night?"#f2d77a":"#d8e4cf",4.8,night?1.5:.7);
+    }
+  }
+
+  const facilities=[
+    {x:-250,z:350,w:118,h:24,type:"hangar"},{x:-335,z:610,w:82,h:18,type:"hangar"},
+    {x:270,z:890,w:138,h:27,type:"terminal"},{x:350,z:1160,w:78,h:20,type:"hangar"},
+    {x:-280,z:1510,w:105,h:23,type:"hangar"},{x:250,z:1880,w:120,h:21,type:"hangar"}
+  ];
+  facilities.map((facility,index)=>({...facility,index,camera:runwayCameraPoint(facility.x,facility.z)}))
+    .filter(facility=>facility.camera.z>25&&facility.camera.z<4200)
+    .sort((a,b)=>b.camera.z-a.camera.z)
+    .forEach(facility=>drawAirportBuilding(facility,theme));
+
+  // 관제탑, 바람자루와 드문 수목을 기준점으로 둬 활주로 주변의 축척을 보여줍니다.
+  drawControlTower(ocean?-215:215,1050,theme);
+  drawWindsock(-112,260,night);
+  if(!desert) {
+    for(const side of [-1,1]) for(let row=0;row<8;row++) {
+      const seed=row*5.7+side*17.2;
+      drawProjectedTree(side*(380+sceneryNoise(seed)*360),120+row*320+sceneryNoise(seed+3)*130,night);
+    }
+  }
+}
+
+function drawAirportBuilding(facility,theme) {
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2,z=facility.camera.z;
+  const x=facility.camera.x*focal/z,half=facility.w*focal/z*.5;
+  const bottom=eyeHeight*focal/z,top=(eyeHeight-facility.h)*focal/z;
+  if(x+half<-width||x-half>width||bottom<-height*.25||top>height*1.25)return;
+  const alpha=clamp(1-z/4600,.28,.95);
+  const wall=theme.desert?"#8c7963":theme.night?"#132b35":"#667875";
+  const wallShade=theme.desert?"#5c4d40":theme.night?"#071820":"#354b4d";
+  const roof=theme.desert?"#b19a7c":theme.night?"#38515a":"#9ba59b";
+  ctx.save();ctx.globalAlpha=alpha;
+  ctx.fillStyle=wall;ctx.fillRect(x-half,top,half*2,Math.max(2,bottom-top));
+  ctx.fillStyle=wallShade;ctx.fillRect(x+half*.5,top,half*.5,Math.max(2,bottom-top));
+  const roofLift=clamp(900/z,2,9);
+  path([[x-half,top],[x,top-roofLift],[x+half,top],[x+half*.78,top+2],[x-half*.78,top+2]],roof);
+  if(facility.type==="hangar"&&bottom-top>7) {
+    ctx.fillStyle=theme.night?"#061016":"#25383b";ctx.fillRect(x-half*.54,top+(bottom-top)*.28,half*1.08,(bottom-top)*.72);
+    ctx.strokeStyle=theme.night?"#718b8b55":"#b8c4ba66";ctx.lineWidth=1;
+    for(const division of [-.27,0,.27]){ctx.beginPath();ctx.moveTo(x+half*division,top+(bottom-top)*.3);ctx.lineTo(x+half*division,bottom);ctx.stroke();}
+  } else if(bottom-top>6) {
+    ctx.fillStyle=theme.night?"#d7e58dcc":"#b9d2d0aa";
+    for(let column=-3;column<=3;column++)ctx.fillRect(x+column*half*.21-1,top+(bottom-top)*.35,2,2);
+  }
+  ctx.restore();
+}
+
+function drawProjectedPole(worldX,worldZ,color,poleHeight=5,lightSize=.8) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<30||camera.z>3300)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z,top=(eyeHeight-poleHeight)*focal/camera.z;
+  ctx.save();ctx.strokeStyle="#26373bb0";ctx.lineWidth=clamp(500/camera.z,.6,2);ctx.beginPath();ctx.moveTo(x,bottom);ctx.lineTo(x,top);ctx.stroke();
+  const radius=clamp(lightSize*360/camera.z,.55,2.6);ctx.fillStyle=color;ctx.shadowColor=color;ctx.shadowBlur=radius*4;ctx.beginPath();ctx.arc(x,top,radius,0,Math.PI*2);ctx.fill();ctx.restore();
+}
+
+function drawControlTower(worldX,worldZ,theme) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<45||camera.z>4200)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2,heightM=34;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z,top=(eyeHeight-heightM)*focal/camera.z;
+  const shaft=clamp(5*focal/camera.z,1.5,11),cab=shaft*2.3;
+  ctx.save();ctx.fillStyle=theme.night?"#152a31":"#66736f";ctx.fillRect(x-shaft*.5,top+cab*.42,shaft,Math.max(2,bottom-top-cab*.42));
+  ctx.fillStyle=theme.night?"#8eb7ae":"#a9c8c5";ctx.fillRect(x-cab*.5,top,cab,cab*.52);
+  ctx.strokeStyle="#d8e6d0aa";ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,top-clamp(400/camera.z,2,8));ctx.stroke();ctx.restore();
+}
+
+function drawWindsock(worldX,worldZ,night) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<25||camera.z>2200)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z,top=(eyeHeight-9)*focal/camera.z;
+  const length=clamp(9*focal/camera.z,4,18),rise=length*.18;
+  ctx.save();ctx.strokeStyle=night?"#b7c9c2":"#d6ded2";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,bottom);ctx.lineTo(x,top);ctx.stroke();
+  ctx.fillStyle="#e07d55";path([[x,top],[x+length,top+rise],[x+length*.88,top+rise+length*.23],[x,top+length*.16]],"#e07d55");ctx.restore();
 }
 
 function drawRiverAndForest(baseZ,night) {
@@ -1913,8 +2023,16 @@ function runwayRectangle(x1, z1, x2, z2, color) {
 function drawRunway() {
   const half = RUNWAY.width / 2, length = RUNWAY.length;
   runwayRectangle(-85,-100,85,length+100,"#67715c");
+  runwayRectangle(-half-7,-8,-half, length+8,"#74786c");
+  runwayRectangle(half,-8,half+7,length+8,"#74786c");
   runwayRectangle(-half-3,0,half+3,length,"#848877");
   runwayRectangle(-half,0,half,length,"#303b3d");
+  // 포장 이음선과 고무 자국으로 활주로가 하나의 매끈한 회색 판처럼 보이지 않게 합니다.
+  for(let z=95;z<length;z+=125)runwayRectangle(-half+1,z,half-1,z+1.1,"#17262935");
+  for(const base of [245,length-430]) for(let mark=0;mark<8;mark++) {
+    const z=base+mark*17;
+    runwayRectangle(-9.5,z,-5.5,z+24,"#111b1d40");runwayRectangle(5.5,z,9.5,z+24,"#111b1d40");
+  }
   runwayRectangle(-half+1,0,-half+1.6,length,"#d9e3d3");
   runwayRectangle(half-1.6,0,half-1,length,"#d9e3d3");
   for(let z=120;z<length-120;z+=65) runwayRectangle(-.6,z,.6,z+30,"#e1e9dc");
