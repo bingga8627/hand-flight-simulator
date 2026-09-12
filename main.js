@@ -1582,6 +1582,15 @@ function drawAirportEnvironment(theme) {
   // 관제탑, 바람자루와 드문 수목을 기준점으로 둬 활주로 주변의 축척을 보여줍니다.
   drawControlTower(ocean?-215:215,1050,theme);
   drawWindsock(-112,260,night);
+  drawFuelTankFarm(ocean?-330:-430,820,theme);
+  drawRadarStation(ocean?310:440,1460,theme);
+  drawParkedAircraft(-166,585,-1,theme);drawParkedAircraft(160,1420,1,theme);
+  drawParkedAircraft(-178,735,-1,theme);
+  drawAirportVehicles(theme);
+  drawApproachLightSystem(night);
+  for(const [z,label] of [[175,"A"],[620,"B"],[1120,"C"],[1660,"D"],[2050,"E"]]) {
+    drawTaxiwaySign(-47,z,label,night);drawTaxiwaySign(47,z,label,night);
+  }
   if(!desert) {
     for(const side of [-1,1]) for(let row=0;row<8;row++) {
       const seed=row*5.7+side*17.2;
@@ -1640,6 +1649,83 @@ function drawWindsock(worldX,worldZ,night) {
   const length=clamp(9*focal/camera.z,4,18),rise=length*.18;
   ctx.save();ctx.strokeStyle=night?"#b7c9c2":"#d6ded2";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,bottom);ctx.lineTo(x,top);ctx.stroke();
   ctx.fillStyle="#e07d55";path([[x,top],[x+length,top+rise],[x+length*.88,top+rise+length*.23],[x,top+length*.16]],"#e07d55");ctx.restore();
+}
+
+function drawFuelTankFarm(worldX,worldZ,theme) {
+  for(let index=0;index<4;index++) {
+    const x=worldX+(index%2)*34,z=worldZ+Math.floor(index/2)*48;
+    const camera=runwayCameraPoint(x,z);if(camera.z<40||camera.z>3600)continue;
+    const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+    const centerX=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z;
+    const tankHeight=10,tankWidth=18,top=(eyeHeight-tankHeight)*focal/camera.z;
+    const half=clamp(tankWidth*focal/camera.z*.5,1.5,20),cap=clamp(4*focal/camera.z,.7,5);
+    ctx.save();ctx.globalAlpha=clamp(1-camera.z/4000,.3,.9);
+    ctx.fillStyle=theme.night?"#273b42":"#a5aaa0";ctx.fillRect(centerX-half,top,half*2,Math.max(2,bottom-top));
+    ctx.fillStyle=theme.night?"#4d6265":"#c7cabc";ctx.beginPath();ctx.ellipse(centerX,top,half,cap,0,Math.PI,Math.PI*2);ctx.fill();
+    ctx.strokeStyle=theme.night?"#7c929077":"#e1e1ce88";ctx.beginPath();ctx.ellipse(centerX,bottom,half,cap,0,0,Math.PI);ctx.stroke();ctx.restore();
+  }
+}
+
+function drawRadarStation(worldX,worldZ,theme) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<45||camera.z>4300)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z;
+  const mastTop=(eyeHeight-22)*focal/camera.z,domeTop=(eyeHeight-32)*focal/camera.z;
+  const radius=clamp(8*focal/camera.z,1.8,15);
+  ctx.save();ctx.globalAlpha=clamp(1-camera.z/4700,.3,.9);
+  ctx.strokeStyle=theme.night?"#769294":"#6c7e79";ctx.lineWidth=clamp(650/camera.z,.7,2.3);
+  ctx.beginPath();ctx.moveTo(x,bottom);ctx.lineTo(x,mastTop);ctx.moveTo(x-radius*.7,bottom);ctx.lineTo(x,mastTop);ctx.moveTo(x+radius*.7,bottom);ctx.lineTo(x,mastTop);ctx.stroke();
+  ctx.fillStyle=theme.night?"#a3b7b3":"#e0e3d7";ctx.beginPath();ctx.arc(x,domeTop+radius,radius,Math.PI,Math.PI*2);ctx.fill();ctx.restore();
+}
+
+function drawParkedAircraft(worldX,worldZ,direction,theme) {
+  const length=34,wing=18;
+  const local=[
+    [0,-length*.52],[3,-length*.28],[4,-4],[wing,5],[wing,9],[4,6],[3,length*.32],[8,length*.45],[8,length*.5],
+    [0,length*.43],[-8,length*.5],[-8,length*.45],[-3,length*.32],[-4,6],[-wing,9],[-wing,5],[-4,-4],[-3,-length*.28]
+  ];
+  const points=local.map(([x,z])=>[worldX+x*direction,worldZ+z]);
+  drawGroundPolygon(points,theme.night?"#9db5ae65":theme.desert?"#d7c5a27a":"#d5ddd178",theme.night?"#d8e7da55":"#f2f1dd66");
+}
+
+function drawAirportVehicles(theme) {
+  const vehicles=[
+    {x:-205,z:515,color:"#d9b64f"},{x:-132,z:690,color:"#d8ded5"},{x:205,z:1335,color:"#d9b64f"},
+    {x:132,z:1580,color:"#c95c4d"},{x:315,z:1030,color:"#d8ded5"}
+  ];
+  for(const vehicle of vehicles)drawServiceVehicle(vehicle.x,vehicle.z,vehicle.color,theme);
+}
+
+function drawServiceVehicle(worldX,worldZ,color,theme) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<25||camera.z>2800)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z;
+  const top=(eyeHeight-3.2)*focal/camera.z,half=clamp(4.5*focal/camera.z,.9,10);
+  ctx.save();ctx.fillStyle=color;ctx.globalAlpha=clamp(1-camera.z/3200,.35,.92);ctx.fillRect(x-half,top,half*2,Math.max(1.5,bottom-top));
+  ctx.fillStyle=theme.night?"#9fc4c0":"#31484c";ctx.fillRect(x-half*.45,top,half*.9,Math.max(1,(bottom-top)*.38));
+  ctx.fillStyle="#111a1d";for(const side of [-1,1]){ctx.beginPath();ctx.arc(x+side*half*.62,bottom,clamp(180/camera.z,.5,1.8),0,Math.PI*2);ctx.fill();}ctx.restore();
+}
+
+function drawTaxiwaySign(worldX,worldZ,label,night) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<30||camera.z>1800)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z;
+  const top=(eyeHeight-1.5)*focal/camera.z,half=clamp(3.8*focal/camera.z,1.5,11);
+  ctx.save();ctx.fillStyle="#191d18";ctx.strokeStyle="#e9c94a";ctx.lineWidth=1;ctx.fillRect(x-half,top,half*2,Math.max(2,bottom-top));ctx.strokeRect(x-half,top,half*2,Math.max(2,bottom-top));
+  if(half>5){ctx.fillStyle=night?"#ffe46c":"#f4d654";ctx.font=`bold ${clamp(half*.85,6,10)}px Consolas,monospace`;ctx.textAlign="center";ctx.fillText(label,x,bottom-1);}
+  ctx.restore();
+}
+
+function drawApproachLightSystem(night) {
+  const light=night?"#f8f0c9":"#fffbe5";
+  for(const end of [0,RUNWAY.length]) {
+    const direction=end===0?-1:1;
+    for(let distance=35;distance<=420;distance+=35) {
+      const z=end+direction*distance;
+      drawProjectedPole(0,z,light,.35,1.4);
+      if(distance%105===0)for(const x of [-18,-9,9,18])drawProjectedPole(x,z,light,.3,1.05);
+    }
+  }
 }
 
 function drawRiverAndForest(baseZ,night) {
@@ -2046,6 +2132,11 @@ function drawRunway() {
   }
   for(let z=0;z<=length;z+=70) {
     runwayRectangle(-half-2,z,-half-1,z+1.8,"#ffe9ac");runwayRectangle(half+1,z,half+2,z+1.8,"#ffe9ac");
+  }
+  // 가까운 거리에서는 활주로 가장자리 등이 실제 점광원처럼 보입니다.
+  for(let z=45;z<length;z+=95) for(const x of [-half-1.5,half+1.5]) {
+    const endDistance=Math.min(z,length-z);
+    drawProjectedPole(x,z,endDistance<190?"#ff6b5f":"#f4f4dc",.28,endDistance<190?1.35:1.0);
   }
   runwayRectangle(-half,0,half,2,"#b7f6b7");runwayRectangle(-half,length-2,half,length,"#b7f6b7");
   if (lesson.phase === "airborne") {
