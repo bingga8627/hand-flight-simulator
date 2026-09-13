@@ -1662,22 +1662,34 @@ function drawRegionalLandmarks(theme,now) {
       drawValleyBridge(-980,baseZ+1280,420,theme);
       drawWindTurbine(1120,baseZ+920,now,theme);drawWindTurbine(1280,baseZ+1140,now+900,theme);
       drawPowerPylon(-1320,baseZ+720,theme);drawPowerPylon(-1260,baseZ+1660,theme);
+      drawMountainVillage(760,baseZ+1880,theme);
+      drawTerracedFields(-690,baseZ+2550,theme);
+      drawRailCorridor(-430,baseZ+350,baseZ+3600,now,theme);
     } else if(worldMap==="night-city") {
       drawRegionalCity(theme,baseZ,true);
       drawValleyBridge(-820,baseZ+1180,620,theme);
       drawValleyBridge(760,baseZ+2840,520,theme);
       drawPowerPylon(1320,baseZ+850,theme);drawPowerPylon(1260,baseZ+1880,theme);
+      drawRailCorridor(330,baseZ+260,baseZ+3950,now,theme);
+      drawCityPark(-710,baseZ+3160,theme);
+      drawStadium(920,baseZ+1450,theme);
     } else if(worldMap==="ocean-islands") {
       drawScenicIsland(-920,baseZ+1050,230,150,false,theme);
       drawScenicIsland(1080,baseZ+2240,300,185,true,theme);
       drawLighthouse(-850,baseZ+990,theme);
       drawBoat(-420,baseZ+1550,now*.004,theme);drawBoat(640,baseZ+3050,-now*.003,theme);
       drawBoat(1150,baseZ+650,now*.0025,theme);
+      drawMarina(880,baseZ+2110,theme);
+      drawCargoShip(-1050,baseZ+2920,now,theme);
+      drawNavigationBuoy(-210,baseZ+720,now);drawNavigationBuoy(340,baseZ+2360,now+800);
     } else if(worldMap==="desert-base") {
       drawDesertMesa(-1080,baseZ+920,330,105,theme);
       drawDesertMesa(1180,baseZ+2350,420,135,theme);
       drawSolarFarm(620,baseZ+720,theme);drawSolarFarm(-760,baseZ+2780,theme);
       drawPowerPylon(-1250,baseZ+560,theme);drawPowerPylon(-1180,baseZ+1480,theme);drawPowerPylon(-1110,baseZ+2420,theme);
+      drawDesertObservatory(890,baseZ+3280,theme);
+      drawDryRiverbed(-240,baseZ+200,baseZ+4050);
+      drawRadioArray(-720,baseZ+1580,theme);
     }
   }
 }
@@ -1798,6 +1810,137 @@ function drawSolarFarm(worldX,worldZ,theme) {
     const x=worldX+column*34,z=worldZ+row*58;
     runwayRectangle(x,z,x+25,z+18,theme.night?"#1f425188":"#244c5c9b");
     runwayRectangle(x,z+8,x+25,z+10,"#91b6b04a");
+  }
+}
+
+// 산비탈 마을은 작은 집, 붉은 지붕과 진입로를 묶어 하나의 생활권처럼 보이게 합니다.
+function drawMountainVillage(centerX,worldZ,theme) {
+  drawGroundEllipse(centerX,worldZ,235,130,"#536e5660");
+  for(let index=0;index<14;index++) {
+    const seed=worldZ*.003+index*4.73;
+    const x=centerX+(sceneryNoise(seed)-.5)*350,z=worldZ+(sceneryNoise(seed+5.1)-.5)*180;
+    const camera=runwayCameraPoint(x,z);if(camera.z<55||camera.z>3500)continue;
+    drawSmallHouse(x,z,8+sceneryNoise(seed+2)*8,5+sceneryNoise(seed+7)*4,index%3===0?"#b86949":"#8c5544",theme);
+  }
+  runwayRectangle(centerX-4,worldZ-260,centerX+4,worldZ+245,"#b7aa8655");
+  for(let tree=0;tree<11;tree++)drawProjectedTree(centerX-220+tree*43,worldZ+115+Math.sin(tree)*32,false);
+}
+
+function drawSmallHouse(worldX,worldZ,widthM,heightM,roofColor,theme) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<45||camera.z>3600)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z,top=(eyeHeight-heightM)*focal/camera.z;
+  const half=clamp(widthM*focal/camera.z*.5,.8,12),roof=clamp(heightM*focal/camera.z*.42,1,7);
+  ctx.save();ctx.globalAlpha=clamp(1-camera.z/4000,.25,.88);
+  ctx.fillStyle=theme.night?"#172a30":"#d7c6a5";ctx.fillRect(x-half,top,half*2,Math.max(1,bottom-top));
+  path([[x-half*1.15,top],[x,top-roof],[x+half*1.15,top]],roofColor);
+  if(half>3){ctx.fillStyle=theme.night?"#efcf78":"#365554";ctx.fillRect(x-half*.2,lerp(top,bottom,.42),half*.4,Math.max(1,(bottom-top)*.34));}
+  ctx.restore();
+}
+
+// 등고선을 따라 휘어진 경작 띠를 겹쳐 산악 지형의 축척과 높낮이를 보여 줍니다.
+function drawTerracedFields(centerX,worldZ,theme) {
+  const colors=["#81906645","#a5a06f3d","#526d5548"];
+  for(let terrace=0;terrace<7;terrace++) {
+    const z=worldZ+terrace*42,widthM=260-terrace*18;
+    drawGroundEllipse(centerX+Math.sin(terrace*.9)*34,z,widthM,28,colors[terrace%colors.length]);
+    drawGroundPolyline([[centerX-widthM,z],[centerX,z-10],[centerX+widthM,z+5]],"#d4d2aa2b",.8);
+  }
+}
+
+// 선로와 열차를 같은 월드 경로에 배치해 도시와 외곽이 연결되어 보이게 합니다.
+function drawRailCorridor(worldX,startZ,endZ,now,theme) {
+  const startCamera=runwayCameraPoint(worldX,startZ),endCamera=runwayCameraPoint(worldX,endZ);
+  if(Math.max(startCamera.z,endCamera.z)<RUNWAY_NEAR_CLIP||Math.min(startCamera.z,endCamera.z)>CITY_DRAW_DISTANCE)return;
+  runwayRectangle(worldX-8,startZ,worldX+8,endZ,theme.night?"#101d23b8":"#4e5450a0");
+  runwayRectangle(worldX-5,startZ,worldX-3.6,endZ,theme.night?"#9bb5ab66":"#c8c4ad68");
+  runwayRectangle(worldX+3.6,startZ,worldX+5,endZ,theme.night?"#9bb5ab66":"#c8c4ad68");
+  for(let z=startZ;z<endZ;z+=38)runwayRectangle(worldX-7,z,worldX+7,z+2,"#261f1b78");
+  const travel=(now*.045)%(endZ-startZ-320),trainZ=startZ+160+travel;
+  for(let car=0;car<4;car++) {
+    const z=trainZ-car*34;
+    runwayRectangle(worldX-6.5,z-14,worldX+6.5,z+14,car===0?"#d5b557d9":theme.night?"#3c6972d9":"#7b8b82d9");
+    if(theme.night)drawProjectedMarker(worldX,z+11,"#f4df8b",1.6);
+  }
+}
+
+function drawCityPark(worldX,worldZ,theme) {
+  drawGroundEllipse(worldX,worldZ,170,105,theme.night?"#102f2caa":"#426b4daa");
+  drawGroundEllipse(worldX,worldZ,105,55,theme.night?"#173c36a0":"#66865aa0");
+  drawGroundPolyline([[worldX-155,worldZ],[worldX+155,worldZ]],theme.night?"#d5c67b42":"#ded2a03d",1);
+  for(let index=0;index<13;index++) {
+    const angle=index*2.399,rx=65+(index%3)*38;
+    drawProjectedTree(worldX+Math.cos(angle)*rx,worldZ+Math.sin(angle)*rx*.55,theme.night);
+    if(theme.night&&index%2===0)drawProjectedMarker(worldX+Math.cos(angle)*125,worldZ+Math.sin(angle)*72,"#e9d37a",1.25);
+  }
+}
+
+function drawStadium(worldX,worldZ,theme) {
+  drawGroundEllipse(worldX,worldZ,125,82,theme.night?"#26383fc0":"#69756ca8");
+  drawGroundEllipse(worldX,worldZ,96,57,theme.night?"#173f38c8":"#4c7658c0");
+  drawGroundEllipse(worldX,worldZ,56,28,theme.night?"#315b4ac0":"#71975fc0");
+  for(let index=0;index<8;index++) {
+    const angle=index*Math.PI/4,x=worldX+Math.cos(angle)*112,z=worldZ+Math.sin(angle)*72;
+    drawProjectedPole(x,z,theme.night?"#e8f5da":"#dce7d5",theme.night?.7:.25,1.7);
+  }
+}
+
+function drawMarina(worldX,worldZ,theme) {
+  runwayRectangle(worldX-160,worldZ-7,worldX+75,worldZ+7,"#bda879b0");
+  for(let pier=0;pier<5;pier++) {
+    const x=worldX-125+pier*43;
+    runwayRectangle(x-3,worldZ-8,x+3,worldZ+92,"#a89169a8");
+    for(let berth=0;berth<3;berth++) {
+      const z=worldZ+18+berth*29,side=(pier+berth)%2?-1:1;
+      drawGroundPolygon([[x+side*5,z-8],[x+side*19,z-6],[x+side*18,z+7],[x+side*5,z+8]],"#e4ddd0a8","#f8f5df55");
+    }
+  }
+}
+
+function drawCargoShip(worldX,worldZ,now,theme) {
+  const x=worldX+Math.sin(now*.00015+worldZ)*45;
+  drawGroundPolygon([[x-22,worldZ-75],[x+22,worldZ-75],[x+31,worldZ+52],[x,worldZ+82],[x-31,worldZ+52]],"#b65448c8","#f3ded16b");
+  runwayRectangle(x-18,worldZ-18,x+18,worldZ+35,"#d8d2c4a8");
+  for(let crate=0;crate<6;crate++) {
+    const cx=x-15+(crate%3)*15,cz=worldZ-51+Math.floor(crate/3)*20;
+    runwayRectangle(cx,cz,cx+12,cz+16,crate%2?"#b98b45c0":"#456a70c0");
+  }
+}
+
+function drawNavigationBuoy(worldX,worldZ,now) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<35||camera.z>3000)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z,top=(eyeHeight-5)*focal/camera.z,r=clamp(2.2*focal/camera.z,.7,5);
+  ctx.save();ctx.strokeStyle="#d95345";ctx.fillStyle="#e55d49";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,bottom);ctx.lineTo(x,top);ctx.stroke();ctx.beginPath();ctx.arc(x,bottom-r,r,0,Math.PI*2);ctx.fill();
+  if(Math.floor(now/700)%2===0){ctx.fillStyle="#fff1b2";ctx.shadowColor="#fff1b2";ctx.shadowBlur=8;ctx.beginPath();ctx.arc(x,top,Math.max(.8,r*.55),0,Math.PI*2);ctx.fill();}ctx.restore();
+}
+
+function drawDesertObservatory(worldX,worldZ,theme) {
+  drawGroundEllipse(worldX,worldZ,105,70,"#78604e91");
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<55||camera.z>4200)return;
+  const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2;
+  const x=camera.x*focal/camera.z,bottom=eyeHeight*focal/camera.z,top=(eyeHeight-18)*focal/camera.z,r=clamp(16*focal/camera.z,2,22);
+  ctx.save();ctx.globalAlpha=clamp(1-camera.z/4700,.3,.9);ctx.fillStyle="#c9b995";ctx.fillRect(x-r*.82,top+r*.15,r*1.64,Math.max(2,bottom-top-r*.15));
+  ctx.fillStyle="#e2dcc4";ctx.beginPath();ctx.arc(x,top+r*.45,r,Math.PI,Math.PI*2);ctx.fill();ctx.strokeStyle="#6f6255";ctx.beginPath();ctx.moveTo(x,top-r*.55);ctx.lineTo(x,top+r*.4);ctx.stroke();ctx.restore();
+}
+
+function drawDryRiverbed(centerX,startZ,endZ) {
+  const left=[],right=[];
+  for(let step=0;step<=12;step++) {
+    const z=lerp(startZ,endZ,step/12),x=centerX+Math.sin(z*.0021)*155,widthM=34+sceneryNoise(z*.014)*36;
+    left.push([x-widthM,z]);right.unshift([x+widthM,z]);
+  }
+  drawGroundPolygon(left.concat(right),"#6e4a3970","#d4a26a34");
+  drawGroundPolyline(left,"#e2b4772c",.8);drawGroundPolyline(right,"#e2b4772c",.8);
+}
+
+function drawRadioArray(worldX,worldZ,theme) {
+  for(let dish=0;dish<5;dish++) {
+    const x=worldX+(dish%3)*42,z=worldZ+Math.floor(dish/3)*65;
+    const camera=runwayCameraPoint(x,z);if(camera.z<50||camera.z>3600)continue;
+    const focal=height*.9,eyeHeight=flight.altitude*FEET_TO_METERS+2.2,px=camera.x*focal/camera.z;
+    const bottom=eyeHeight*focal/camera.z,top=(eyeHeight-13)*focal/camera.z,r=clamp(8*focal/camera.z,1.3,10);
+    ctx.save();ctx.globalAlpha=clamp(1-camera.z/4000,.25,.85);ctx.strokeStyle="#9b9c8e";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(px,bottom);ctx.lineTo(px,top);ctx.stroke();ctx.beginPath();ctx.arc(px+r*.35,top,r,Math.PI*.65,Math.PI*1.45);ctx.stroke();ctx.restore();
   }
 }
 
