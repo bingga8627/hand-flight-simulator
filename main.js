@@ -117,6 +117,15 @@ let selectedMissionId = (()=>{try{const saved=localStorage.getItem("aeronaut-mis
 // 이전 Google 버전에서 브라우저에 저장했을 수 있는 키도 업그레이드 즉시 삭제합니다.
 try{localStorage.removeItem("aeronaut-google-map-key");localStorage.removeItem("aeronaut-real-earth");}catch{}
 const terrainTextures={};
+// 지형 모양은 월드 좌표가 바뀌기 전까지 재사용합니다. 오래된 구역은 제거해 메모리 증가를 막습니다.
+const sceneryCache={islands:new Map(),districts:new Map(),regionalCities:new Map(),roads:new Map()};
+function rememberScenery(cache,key,create,limit=96) {
+  if(cache.has(key))return cache.get(key);
+  const value=create();cache.set(key,value);
+  if(cache.size>limit)cache.delete(cache.keys().next().value);
+  return value;
+}
+const performanceStats={visible:false,frames:0,lastReport:0,fps:0,renderMs:0,inferenceMs:0};
 function terrainTexture(map) {
   if(terrainTextures[map])return terrainTextures[map];
   const image=new Image();image.decoding="async";image.src=TERRAIN_TEXTURE_URLS[map];
@@ -948,7 +957,10 @@ function trackHands(now) {
   lastInference = now;
   lastVideoTime = video.currentTime;
   try {
-    processHands(landmarker.detectForVideo(video, now), now);
+    const inferenceStart=performanceStats.visible?performance.now():0;
+    const result=landmarker.detectForVideo(video, now);
+    if(performanceStats.visible)performanceStats.inferenceMs=damp(performanceStats.inferenceMs,performance.now()-inferenceStart,4,1/TRACKING_FPS);
+    processHands(result, now);
     inferenceFailures = 0;
   } catch (error) {
     clearHands();
@@ -1776,28 +1788,39 @@ function drawOuterSettlement(centerX,worldZ,count,theme,kind) {
 }
 
 function drawOuterCityDistrict(centerX,worldZ,theme,count) {
+  const key=`${centerX}:${worldZ}:${count}`;
+  const layout=rememberScenery(sceneryCache.districts,key,()=>{
+    const result=[];
+    for(let index=0;index<count;index++) {
+      const seed=worldZ*.0013+index*5.87,row=Math.floor(index/7),column=index%7;
+      const x=centerX+(column-3)*115+(sceneryNoise(seed)-.5)*58;
+      const z=worldZ+(row-2)*180+(sceneryNoise(seed+4.2)-.5)*75;
+      result.push({x,z,seed,width:38+sceneryNoise(seed+2.8)*68,height:32+sceneryNoise(seed+8.5)*175});
+    }
+    return result;
+  },32);
   const buildings=[];
-  for(let index=0;index<count;index++) {
-    const seed=worldZ*.0013+index*5.87,row=Math.floor(index/7),column=index%7;
-    const x=centerX+(column-3)*115+(sceneryNoise(seed)-.5)*58;
-    const z=worldZ+(row-2)*180+(sceneryNoise(seed+4.2)-.5)*75;
+  for(const {x,z,seed,width:buildingWidth,height:buildingHeight} of layout) {
     const camera=runwayCameraPoint(x,z);if(camera.z<90||camera.z>CITY_DRAW_DISTANCE)continue;
-    buildings.push({camera,x,z,seed,width:38+sceneryNoise(seed+2.8)*68,height:32+sceneryNoise(seed+8.5)*175});
+    buildings.push({camera,x,z,seed,width:buildingWidth,height:buildingHeight});
   }
   buildings.sort((a,b)=>b.camera.z-a.camera.z).forEach(building=>drawCityBuilding(building,theme,.72));
   drawHelipad(centerX+190,worldZ-120,theme);
 }
 
 function drawOrbitalRoad(worldZ,now,theme) {
-  const arcs=[];
-  for(const [start,end] of [[Math.PI*.14,Math.PI*.86],[Math.PI*1.14,Math.PI*1.86]]) {
-    const road=[];
-    for(let step=0;step<=14;step++) {
-      const angle=lerp(start,end,step/14);
-      road.push([Math.cos(angle)*3000,worldZ+Math.sin(angle)*1250]);
+  const arcs=rememberScenery(sceneryCache.roads,worldZ,()=>{
+    const result=[];
+    for(const [start,end] of [[Math.PI*.14,Math.PI*.86],[Math.PI*1.14,Math.PI*1.86]]) {
+      const road=[];
+      for(let step=0;step<=14;step++) {
+        const angle=lerp(start,end,step/14);
+        road.push([Math.cos(angle)*3000,worldZ+Math.sin(angle)*1250]);
+      }
+      result.push(road);
     }
-    arcs.push(road);
-  }
+    return result;
+  },24);
   if(!arcs.some(road=>road.some(([x,z])=>isWorldAreaVisible(x,z))))return;
   for(const road of arcs){drawGroundPolyline(road,"#0a151a9c",2.8);drawGroundPolyline(road,"#d8c96b32",.55);}
   for(let car=0;car<14;car++) {
@@ -1816,15 +1839,23 @@ function drawOuterIslandChain(centerX,worldZ,direction,theme) {
 }
 
 function drawRegionalCity(theme,baseZ,dense) {
+  const key=`${baseZ}:${dense}`;
+  const layout=rememberScenery(sceneryCache.regionalCities,key,()=>{
+    const result=[];
+    const rows=dense?7:5,columns=dense?4:3;
+    for(const side of [-1,1])for(let row=0;row<rows;row++)for(let column=0;column<columns;column++) {
+      const seed=baseZ*.0023+side*41+row*7.7+column*2.9;
+      const z=baseZ+520+row*(dense?430:610)+sceneryNoise(seed)*170;
+      const x=side*((dense?430:520)+column*(dense?125:165)+sceneryNoise(seed+3.7)*95);
+      const tall=dense&&sceneryNoise(seed+8.4)>.66;
+      result.push({x,z,seed,width:(dense?38:32)+sceneryNoise(seed+5.2)*(dense?74:55),height:(dense?28:18)+sceneryNoise(seed+9.1)*(tall?210:dense?115:75)});
+    }
+    return result;
+  },32);
   const buildings=[];
-  const rows=dense?7:5,columns=dense?4:3;
-  for(const side of [-1,1]) for(let row=0;row<rows;row++) for(let column=0;column<columns;column++) {
-    const seed=baseZ*.0023+side*41+row*7.7+column*2.9;
-    const z=baseZ+520+row*(dense?430:610)+sceneryNoise(seed)*170;
-    const x=side*((dense?430:520)+column*(dense?125:165)+sceneryNoise(seed+3.7)*95);
+  for(const {x,z,seed,width:buildingWidth,height:buildingHeight} of layout) {
     const camera=runwayCameraPoint(x,z);if(camera.z<80||camera.z>CITY_DRAW_DISTANCE)continue;
-    const tall=dense&&sceneryNoise(seed+8.4)>.66;
-    buildings.push({camera,x,z,seed,width:(dense?38:32)+sceneryNoise(seed+5.2)*(dense?74:55),height:(dense?28:18)+sceneryNoise(seed+9.1)*(tall?210:dense?115:75)});
+    buildings.push({camera,x,z,seed,width:buildingWidth,height:buildingHeight});
   }
   buildings.sort((a,b)=>b.camera.z-a.camera.z);
   const opacity=clamp(1-flight.altitude/7200,.18,.72);
@@ -1895,12 +1926,19 @@ function drawScenicIsland(worldX,worldZ,radiusX,radiusZ,settled,theme) {
 }
 
 function drawIrregularIsland(worldX,worldZ,radiusX,radiusZ,color,seed) {
-  const points=[];
-  for(let index=0;index<28;index++) {
-    const angle=index*Math.PI*2/28;
-    const wobble=.84+sceneryNoise(seed+index*2.71)*.25+Math.sin(angle*3+seed)*.035;
-    points.push([worldX+Math.cos(angle)*radiusX*wobble,worldZ+Math.sin(angle)*radiusZ*wobble]);
-  }
+  const reach=Math.hypot(radiusX,radiusZ),camera=runwayCameraPoint(worldX,worldZ);
+  if(camera.z+reach<RUNWAY_NEAR_CLIP||camera.z-reach>9200)return;
+  const key=`${worldX}:${worldZ}:${radiusX}:${radiusZ}:${seed}`;
+  const outline=rememberScenery(sceneryCache.islands,key,()=>{
+    const result=[];
+    for(let index=0;index<28;index++) {
+      const angle=index*Math.PI*2/28;
+      const wobble=.84+sceneryNoise(seed+index*2.71)*.25+Math.sin(angle*3+seed)*.035;
+      result.push([worldX+Math.cos(angle)*radiusX*wobble,worldZ+Math.sin(angle)*radiusZ*wobble]);
+    }
+    return {near:result,far:result.filter((_,index)=>index%2===0)};
+  },144);
+  const points=camera.z>2900?outline.far:outline.near;
   drawGroundPolygon(points,color);
 }
 
@@ -2584,9 +2622,13 @@ function drawDesertBaseDetails(baseZ) {
 }
 
 function drawGroundEllipse(centerX,centerZ,radiusX,radiusZ,color) {
+  const center=runwayCameraPoint(centerX,centerZ),reach=Math.hypot(radiusX,radiusZ);
+  if(center.z+reach<RUNWAY_NEAR_CLIP||center.z-reach>CITY_DRAW_DISTANCE)return;
+  // 먼 타원은 절반 수준의 꼭짓점으로 충분합니다. 가까운 지형의 형태는 유지합니다.
+  const vertices=center.z>2800?12:22;
   const cameraPoints=[];
-  for(let i=0;i<22;i++) {
-    const angle=Math.PI*2*i/22;
+  for(let i=0;i<vertices;i++) {
+    const angle=Math.PI*2*i/vertices;
     cameraPoints.push(runwayCameraPoint(centerX+Math.cos(angle)*radiusX,centerZ+Math.sin(angle)*radiusZ));
   }
   const clipped=clipRunwayPolygon(cameraPoints);if(clipped.length<3)return;
@@ -3190,7 +3232,18 @@ function animate(now) {
   trackHands(now);
   updateFlight(dt,now);
   updateFlightEffects(now);
+  const renderStart=performanceStats.visible?performance.now():0;
   drawWorld(now);drawCockpit(now);drawFlightDirector();drawStick();
+  if(performanceStats.visible) {
+    performanceStats.renderMs=damp(performanceStats.renderMs,performance.now()-renderStart,4,dt);
+    performanceStats.frames++;
+    if(now-performanceStats.lastReport>650) {
+      const elapsed=now-performanceStats.lastReport;
+      performanceStats.fps=performanceStats.lastReport?Math.round(performanceStats.frames*1000/elapsed):0;
+      performanceStats.frames=0;performanceStats.lastReport=now;
+      $("performance-status").textContent=`FPS ${performanceStats.fps||"—"} · 화면 ${performanceStats.renderMs.toFixed(1)} MS · 손 추론 ${cameraActive?performanceStats.inferenceMs.toFixed(1):"—"} MS`;
+    }
+  }
   updateEngineSound();
   if(now-lastHud>100){updateHud();lastHud=now;}
   requestAnimationFrame(animate);
@@ -3354,6 +3407,12 @@ $("control-response").addEventListener("change", event => {
 });
 $("vertical-pitch-assist").addEventListener("change", () => { stick.y=0; updateHud(); });
 $("swap-hands").addEventListener("change",() => { clearHands(); clearCalibration(); });
+$("performance-button").addEventListener("click",()=>{
+  performanceStats.visible=!performanceStats.visible;
+  performanceStats.frames=0;performanceStats.lastReport=0;performanceStats.renderMs=0;
+  $("performance-button").setAttribute("aria-pressed",String(performanceStats.visible));
+  $("performance-status").hidden=!performanceStats.visible;
+});
 $("camera-select").addEventListener("change", () => {
   if (connectionStage === "camera" || connectionStage === "model") return;
   // 선택만 바꾸면 권한 요청을 하지 않습니다. 이미 연결 중일 때에만 즉시 전환합니다.
