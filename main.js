@@ -1114,6 +1114,7 @@ function drawWorld(now) {
   if(terrainReady) drawWorldDetailOverlay(theme);
   drawRegionalGround(theme);
   drawTerrainTexture(theme);
+  drawOuterWorld(theme,now);
   drawRegionalLandmarks(theme,now);
 
   // 지면의 원근 격자와 패치가 전진감을 줍니다. 고도에 따라 격자 크기도 완만히 변합니다.
@@ -1703,6 +1704,114 @@ function drawRegionalLandmarks(theme,now) {
       drawPumpjackField(-980,baseZ+3350,now,theme);
       drawDesertCamp(760,baseZ+1960,theme);
     }
+  }
+}
+
+// 활주로 중심에서 수 km 떨어진 독립 구역을 배치합니다. 선회하면 공항이 아닌 새로운 지역이 시야에 들어옵니다.
+function drawOuterWorld(theme,now) {
+  const sectorLength=6800,sectorBase=Math.floor(lesson.z/sectorLength)*sectorLength;
+  for(let sector=-1;sector<=1;sector++) {
+    const baseZ=sectorBase+sector*sectorLength;
+    if(worldMap==="mountain-city") {
+      if(isWorldAreaVisible(-2600,baseZ+2100)) {
+        drawRemoteLake(-2600,baseZ+2100,theme);
+        drawForestGrove(-2250,baseZ+2500,30,false);
+      }
+      if(isWorldAreaVisible(2550,baseZ+3450)) {
+        drawOuterSettlement(2550,baseZ+3450,18,theme,"mountain");
+        drawTerracedFields(2150,baseZ+3800,theme);
+      }
+      drawCountryRoad([[-3900,baseZ+650],[-2850,baseZ+1650],[-1250,baseZ+2750],[950,baseZ+4100],[3300,baseZ+5250]],theme);
+    } else if(worldMap==="night-city") {
+      if(isWorldAreaVisible(-2650,baseZ+2550))drawOuterCityDistrict(-2650,baseZ+2550,theme,36);
+      if(isWorldAreaVisible(2850,baseZ+4100))drawOuterCityDistrict(2850,baseZ+4100,theme,42);
+      drawOrbitalRoad(baseZ+3300,now,theme);
+    } else if(worldMap==="ocean-islands") {
+      if(isWorldAreaVisible(-2750,baseZ+1700))drawOuterIslandChain(-2750,baseZ+1700,-1,theme);
+      if(isWorldAreaVisible(2850,baseZ+3900))drawOuterIslandChain(2850,baseZ+3900,1,theme);
+      if(isWorldAreaVisible(-2250,baseZ+4700)) {
+        drawScenicIsland(-2250,baseZ+4700,430,270,true,theme);
+        drawHarborCranes(-1990,baseZ+4630,theme);
+      }
+    } else if(worldMap==="desert-base") {
+      if(isWorldAreaVisible(-2850,baseZ+1800)) {
+        drawDesertMesa(-2850,baseZ+1800,680,190,theme);
+        drawPumpjackField(-2450,baseZ+2150,now,theme);
+      }
+      if(isWorldAreaVisible(2750,baseZ+3900)) {
+        drawOuterSettlement(2750,baseZ+3900,12,theme,"desert");
+        drawSolarFarm(2350,baseZ+4250,theme);
+      }
+      drawCountryRoad([[-3600,baseZ+350],[-2450,baseZ+1500],[-700,baseZ+2950],[1350,baseZ+4100],[3650,baseZ+5650]],theme);
+    }
+  }
+}
+
+function isWorldAreaVisible(worldX,worldZ,maxDistance=9200) {
+  const camera=runwayCameraPoint(worldX,worldZ);if(camera.z<70||camera.z>maxDistance)return false;
+  const projectedX=camera.x*(height*.9)/camera.z;
+  return Math.abs(projectedX)<width*1.8;
+}
+
+function drawCountryRoad(points,theme) {
+  const visible=points.some(([x,z])=>isWorldAreaVisible(x,z));if(!visible)return;
+  drawGroundPolyline(points,theme.desert?"#5a443687":theme.night?"#101e25a8":"#4b57518a",5);
+  drawGroundPolyline(points,theme.night?"#e2ca6c48":"#d8d0a638",.8);
+}
+
+function drawRemoteLake(worldX,worldZ,theme) {
+  drawIrregularIsland(worldX,worldZ,470,260,"#223c3d55",worldZ*.002);
+  drawIrregularIsland(worldX,worldZ,420,225,"#315f628f",worldZ*.002+4.8);
+  drawGroundPolyline([[worldX-330,worldZ-40],[worldX-80,worldZ-65],[worldX+210,worldZ-25]],"#dae5d14a",1);
+}
+
+function drawOuterSettlement(centerX,worldZ,count,theme,kind) {
+  drawGroundEllipse(centerX,worldZ,360,210,kind==="desert"?"#8e6b4c4c":"#5e74584a");
+  for(let index=0;index<count;index++) {
+    const seed=worldZ*.0017+index*7.13,angle=index*2.399,spread=55+sceneryNoise(seed)*285;
+    const x=centerX+Math.cos(angle)*spread,z=worldZ+Math.sin(angle)*spread*.55;
+    drawSmallHouse(x,z,kind==="desert"?14:10,kind==="desert"?7:6,kind==="desert"?"#8a6852":"#9c5947",theme);
+  }
+  drawCountryRoad([[centerX-620,worldZ-430],[centerX-180,worldZ-90],[centerX+80,worldZ],[centerX+590,worldZ+380]],theme);
+}
+
+function drawOuterCityDistrict(centerX,worldZ,theme,count) {
+  const buildings=[];
+  for(let index=0;index<count;index++) {
+    const seed=worldZ*.0013+index*5.87,row=Math.floor(index/7),column=index%7;
+    const x=centerX+(column-3)*115+(sceneryNoise(seed)-.5)*58;
+    const z=worldZ+(row-2)*180+(sceneryNoise(seed+4.2)-.5)*75;
+    const camera=runwayCameraPoint(x,z);if(camera.z<90||camera.z>CITY_DRAW_DISTANCE)continue;
+    buildings.push({camera,x,z,seed,width:38+sceneryNoise(seed+2.8)*68,height:32+sceneryNoise(seed+8.5)*175});
+  }
+  buildings.sort((a,b)=>b.camera.z-a.camera.z).forEach(building=>drawCityBuilding(building,theme,.72));
+  drawHelipad(centerX+190,worldZ-120,theme);
+}
+
+function drawOrbitalRoad(worldZ,now,theme) {
+  const arcs=[];
+  for(const [start,end] of [[Math.PI*.14,Math.PI*.86],[Math.PI*1.14,Math.PI*1.86]]) {
+    const road=[];
+    for(let step=0;step<=14;step++) {
+      const angle=lerp(start,end,step/14);
+      road.push([Math.cos(angle)*3000,worldZ+Math.sin(angle)*1250]);
+    }
+    arcs.push(road);
+  }
+  if(!arcs.some(road=>road.some(([x,z])=>isWorldAreaVisible(x,z))))return;
+  for(const road of arcs){drawGroundPolyline(road,"#0a151a9c",2.8);drawGroundPolyline(road,"#d8c96b32",.55);}
+  for(let car=0;car<14;car++) {
+    const angle=((now*.000035+car/14)%1)*Math.PI*2;
+    drawProjectedMarker(Math.cos(angle)*3000,worldZ+Math.sin(angle)*1250,car%3?"#efd977":"#e75651",1.35);
+  }
+}
+
+function drawOuterIslandChain(centerX,worldZ,direction,theme) {
+  for(let island=0;island<5;island++) {
+    const seed=worldZ*.002+island*5.9;
+    const x=centerX+direction*island*360+(sceneryNoise(seed)-.5)*180;
+    const z=worldZ+island*430+(sceneryNoise(seed+3.5)-.5)*180;
+    drawScenicIsland(x,z,125+sceneryNoise(seed+6)*150,75+sceneryNoise(seed+9)*90,island===2,theme);
   }
 }
 
