@@ -118,7 +118,7 @@ let selectedMissionId = (()=>{try{const saved=localStorage.getItem("aeronaut-mis
 try{localStorage.removeItem("aeronaut-google-map-key");localStorage.removeItem("aeronaut-real-earth");}catch{}
 const terrainTextures={};
 // 지형 모양은 월드 좌표가 바뀌기 전까지 재사용합니다. 오래된 구역은 제거해 메모리 증가를 막습니다.
-const sceneryCache={islands:new Map(),districts:new Map(),regionalCities:new Map(),roads:new Map()};
+const sceneryCache={islands:new Map(),districts:new Map(),regionalCities:new Map(),roads:new Map(),relief:new Map()};
 function rememberScenery(cache,key,create,limit=96) {
   if(cache.has(key))return cache.get(key);
   const value=create();cache.set(key,value);
@@ -1292,7 +1292,9 @@ function drawTerrainImage(theme,extent) {
     ctx.beginPath();ctx.moveTo(-nearHalf,yNear);ctx.lineTo(nearHalf,yNear);
     ctx.lineTo(farHalf,yFar);ctx.lineTo(-farHalf,yFar);ctx.closePath();ctx.clip();
     const stripWidth=farHalf*2,shift=horizontalPhase*stripWidth,destinationHeight=yFar-yNear+2;
-    for(let tile=-1;tile<=1;tile++) {
+    // 수평 오프셋은 항상 오른쪽으로 감기므로 화면을 덮는 띠는 0번과 1번뿐입니다.
+    // 화면 밖의 -1번 띠를 매 프레임 그리지 않아 drawImage 호출을 약 1/3 줄입니다.
+    for(let tile=0;tile<=1;tile++) {
       const destinationX=-farHalf-shift+tile*stripWidth;
       const firstDestinationHeight=destinationHeight*(firstHeight/sampleHeight);
       ctx.drawImage(image,0,sourceY,image.naturalWidth,firstHeight,destinationX,yNear,stripWidth,firstDestinationHeight);
@@ -1312,6 +1314,31 @@ function drawTerrainImage(theme,extent) {
 // 넓은 지형 띠를 월드 좌표에 고정해 텍스처 위에 실제 지세처럼 보이는 높낮이와 방향성을 만듭니다.
 function drawTerrainRelief(theme) {
   const baseZ=Math.floor(lesson.z/1100)*1100;
+  // 같은 1100m 구역에 있는 동안 지형의 노이즈·곡선 좌표는 변하지 않습니다.
+  // 구역 이동 시에만 재계산하고 오래된 구역은 캐시에서 제거합니다.
+  const layout=rememberScenery(sceneryCache.relief,baseZ,()=>{
+    const bands=[],patches=[];
+    for(let row=-3;row<=7;row++) {
+      const seed=(baseZ/1100+row)*6.73;
+      const centerZ=baseZ+row*1100+sceneryNoise(seed)*260;
+      const thickness=55+sceneryNoise(seed+4.8)*150;
+      const upper=[],lower=[];
+      for(let point=0;point<=12;point++) {
+        const x=-1900+point*(3800/12);
+        const bend=Math.sin(point*.82+seed)*95+Math.sin(point*1.91+seed*.37)*38;
+        upper.push([x,centerZ+bend-thickness*.5]);
+        lower.unshift([x,centerZ+bend+thickness*.5]);
+      }
+      bands.push({row,upper,polygon:upper.concat(lower)});
+    }
+    for(let row=-2;row<=8;row++) for(let item=0;item<3;item++) {
+      const seed=(baseZ/700+row)*11.3+item*4.7;
+      patches.push({row,item,z:baseZ+row*700+sceneryNoise(seed)*310,
+        x:(sceneryNoise(seed+2.1)-.5)*2800,
+        rx:45+sceneryNoise(seed+5.8)*180,rz:20+sceneryNoise(seed+9.2)*65});
+    }
+    return {bands,patches};
+  },16);
   const altitudeAlpha=clamp(1-flight.altitude/7600,.16,.72);
   const colors=worldMap==="ocean-islands"
     ?["#86d5cf18","#073d591c","#d7eee414"]
@@ -1319,29 +1346,15 @@ function drawTerrainRelief(theme) {
       :theme.night?["#07151d38","#31534b1c","#101f2830"]
         :["#183d3329","#96a76c18","#2b51402b"];
   ctx.save();ctx.globalAlpha=altitudeAlpha;
-  for(let row=-3;row<=7;row++) {
-    const seed=(baseZ/1100+row)*6.73;
-    const centerZ=baseZ+row*1100+sceneryNoise(seed)*260;
-    const thickness=55+sceneryNoise(seed+4.8)*150;
-    const upper=[],lower=[];
-    for(let point=0;point<=12;point++) {
-      const x=-1900+point*(3800/12);
-      const bend=Math.sin(point*.82+seed)*95+Math.sin(point*1.91+seed*.37)*38;
-      upper.push([x,centerZ+bend-thickness*.5]);
-      lower.unshift([x,centerZ+bend+thickness*.5]);
-    }
-    drawGroundPolygon(upper.concat(lower),colors[(row+30)%colors.length]);
-    drawGroundPolyline(upper,theme.desert?"#f0c68b1d":worldMap==="ocean-islands"?"#c9f4ed20":theme.night?"#8bb6a814":"#cbd5a41b",.75);
+  for(const band of layout.bands) {
+    drawGroundPolygon(band.polygon,colors[(band.row+30)%colors.length]);
+    drawGroundPolyline(band.upper,theme.desert?"#f0c68b1d":worldMap==="ocean-islands"?"#c9f4ed20":theme.night?"#8bb6a814":"#cbd5a41b",.75);
   }
 
   // 지면 위 작은 패치는 가까운 곳에서만 보이게 해 축척을 전달하되 격자처럼 반복되지 않게 합니다.
   if(worldMap!=="ocean-islands") {
-    for(let row=-2;row<=8;row++) for(let item=0;item<3;item++) {
-      const seed=(baseZ/700+row)*11.3+item*4.7;
-      const z=baseZ+row*700+sceneryNoise(seed)*310;
-      const x=(sceneryNoise(seed+2.1)-.5)*2800;
-      const rx=45+sceneryNoise(seed+5.8)*180,rz=20+sceneryNoise(seed+9.2)*65;
-      drawGroundEllipse(x,z,rx,rz,colors[(row+item+30)%colors.length]);
+    for(const patch of layout.patches) {
+      drawGroundEllipse(patch.x,patch.z,patch.rx,patch.rz,colors[(patch.row+patch.item+30)%colors.length]);
     }
   }
   ctx.restore();
@@ -2715,10 +2728,16 @@ function cockpitShake(now) {
 
 // 2D 원근 투영: 활주로의 평면 꼭짓점만 카메라 앞쪽으로 잘라 Canvas에 그립니다.
 // 가까운 면을 자르지 않으면 활주로를 지나갈 때 화면을 가로지르는 거대 다각형이 생깁니다.
+let projectionHeading=NaN,projectionSin=0,projectionCos=1;
 function runwayCameraPoint(x, z) {
-  const yaw = radians(flight.heading - RUNWAY.heading);
+  // 한 프레임 안에서 수천 개의 지면 꼭짓점이 같은 방향으로 투영됩니다.
+  // 헤딩이 바뀌었을 때만 삼각함수를 갱신합니다.
+  if(flight.heading!==projectionHeading) {
+    const yaw=radians(flight.heading-RUNWAY.heading);
+    projectionHeading=flight.heading;projectionSin=Math.sin(yaw);projectionCos=Math.cos(yaw);
+  }
   const dx = x - lesson.x, dz = z - lesson.z;
-  return { x: dx * Math.cos(yaw) - dz * Math.sin(yaw), z: dx * Math.sin(yaw) + dz * Math.cos(yaw) };
+  return { x: dx * projectionCos - dz * projectionSin, z: dx * projectionSin + dz * projectionCos };
 }
 function clipRunwayPolygon(points) {
   const output = [];
@@ -2734,8 +2753,12 @@ function clipRunwayPolygon(points) {
   return output;
 }
 function runwayRectangle(x1, z1, x2, z2, color) {
-  const points = clipRunwayPolygon([[x1,z1],[x2,z1],[x2,z2],[x1,z2]].map(([x,z]) => runwayCameraPoint(x,z)));
-  if (points.length < 3) return;
+  const corners=[runwayCameraPoint(x1,z1),runwayCameraPoint(x2,z1),
+    runwayCameraPoint(x2,z2),runwayCameraPoint(x1,z2)];
+  // 완전히 카메라 뒤에 있는 활주로 표식은 클리핑과 투영을 생략합니다.
+  if(corners.every(point=>point.z<RUNWAY_NEAR_CLIP))return;
+  const points=corners.every(point=>point.z>=RUNWAY_NEAR_CLIP)?corners:clipRunwayPolygon(corners);
+  if(points.length<3)return;
   const focal = height * 0.9;
   const eyeHeight = flight.altitude * FEET_TO_METERS + 2.2;
   path(points.map(p => [p.x * focal / p.z, eyeHeight * focal / p.z]), color);
