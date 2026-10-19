@@ -22,3 +22,6 @@
 .flight>:not(#flight-canvas){z-index:2}
 .performance-button{padding:5px 8px;font:10px Consolas,monospace;color:#9fb9ad;background:#14262a;border-color:#6f958b55}.performance-button[aria-pressed="true"]{color:var(--green);border-color:#b4f6ae8a}.performance-status{color:var(--green);font:10px Consolas,monospace}.performance-status[hidden]{display:none}
 .quality-control{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}.quality-control select{padding:4px 6px;border:1px solid #38515a;border-radius:4px;background:#0a151d;color:var(--green);font:inherit}.quality-control select:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.mission-levels{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mission-levels>span{margin-right:5px;color:var(--muted);font-size:12px}.mission-levels button{padding:7px 18px;background:#0d1d27;color:#c6d4d3;border-color:#405860}.mission-levels button[aria-pressed="true"]{color:var(--green);border-color:var(--green);background:#18342e}.mission-level-description{margin:8px 0 14px;font-size:11px;line-height:1.5;color:#9cb6b3}
+.flight>#mission-panel{z-index:7;top:50%;max-height:calc(100% - 24px);overflow-y:auto}
+@media(max-width:700px){.flight>#mission-panel{max-height:78%}}

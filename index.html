@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#080f16">
   <meta name="description" content="양손 제스처로 조종하는 Canvas 1인칭 비행 시뮬레이터">
   <title>AERONAUT — Hand Flight Simulator</title>
-  <link rel="stylesheet" href="style.css?v=20261019-3">
+  <link rel="stylesheet" href="style.css?v=20261019-6">
 </head>
 <body>
   <main class="app">
@@ -57,13 +57,19 @@
       </section>
       <section id="mission-panel" class="map-panel mission-panel" aria-labelledby="mission-select-title" hidden>
         <header><div><span>MISSION CONTROL</span><h2 id="mission-select-title">통합 미션 선택</h2></div><button id="mission-close-button" class="quiet" aria-label="미션 선택 닫기">×</button></header>
-        <div class="mission-grid">
-          <button data-mission="mountain-city" aria-pressed="true"><i class="map-preview mountain-city"></i><span><strong>산악 도시 순환</strong><small>보통 · 상승 항로</small><em data-best="mountain-city">BEST —</em></span></button>
-          <button data-mission="ocean-islands" aria-pressed="false"><i class="map-preview ocean-islands"></i><span><strong>군도 해상 순찰</strong><small>쉬움 · 넓은 선회</small><em data-best="ocean-islands">BEST —</em></span></button>
-          <button data-mission="desert-base" aria-pressed="false"><i class="map-preview desert-base"></i><span><strong>사막 저고도 침투</strong><small>어려움 · 저고도</small><em data-best="desert-base">BEST —</em></span></button>
-          <button data-mission="night-city" aria-pressed="false"><i class="map-preview night-city"></i><span><strong>야간 항법 비행</strong><small>어려움 · 제한 시야</small><em data-best="night-city">BEST —</em></span></button>
+        <div class="mission-levels" role="group" aria-label="미션 난이도">
+          <span>미션 난이도</span>
+          <button type="button" data-mission-level="easy" aria-pressed="true" aria-describedby="mission-level-description">이지</button>
+          <button type="button" data-mission-level="normal" aria-pressed="false" aria-describedby="mission-level-description">노멀</button>
         </div>
-        <div class="mission-brief"><div><span id="mission-difficulty">난이도 보통 · 약 3분</span><strong id="mission-brief-title">산악 도시 순환</strong><p id="mission-description">산맥 아래의 굽은 항로를 따라 상승한 뒤 도시 활주로로 복귀합니다.</p><small id="mission-weather">현재 날씨 · 맑음</small></div><button id="mission-start-button" class="primary">선택한 미션 시작</button></div>
+        <p id="mission-level-description" class="mission-level-description" aria-live="polite">현재의 완만한 코스 · 여유 있게 링을 따라가세요.</p>
+        <div class="mission-grid">
+          <button data-mission="mountain-city" aria-pressed="true"><i class="map-preview mountain-city"></i><span><strong>산악 도시 순환</strong><small>상승 항로</small><em data-best="mountain-city">BEST —</em></span></button>
+          <button data-mission="ocean-islands" aria-pressed="false"><i class="map-preview ocean-islands"></i><span><strong>군도 해상 순찰</strong><small>해상 항로</small><em data-best="ocean-islands">BEST —</em></span></button>
+          <button data-mission="desert-base" aria-pressed="false"><i class="map-preview desert-base"></i><span><strong>사막 저고도 침투</strong><small>저고도 항로</small><em data-best="desert-base">BEST —</em></span></button>
+          <button data-mission="night-city" aria-pressed="false"><i class="map-preview night-city"></i><span><strong>야간 항법 비행</strong><small>제한 시야</small><em data-best="night-city">BEST —</em></span></button>
+        </div>
+        <div class="mission-brief"><div><span id="mission-difficulty">이지 · 약 3분</span><strong id="mission-brief-title">산악 도시 순환</strong><p id="mission-description">산맥 아래의 굽은 항로를 따라 상승한 뒤 도시 활주로로 복귀합니다.</p><small id="mission-weather">현재 날씨 · 맑음</small></div><button id="mission-start-button" class="primary">선택한 미션 시작</button></div>
       </section>
       <section id="flight-result" class="flight-result" tabindex="-1" aria-labelledby="result-title" hidden>
         <span class="result-eyebrow">FLIGHT DEBRIEF</span><h2 id="result-title"></h2><p id="result-description"></p><div id="result-metrics"></div><button id="retry-button" class="primary">같은 훈련 다시 시작</button>
@@ -132,6 +138,6 @@
   </main>
   <!-- 일반 스크립트로 시작해야 파일을 직접 열어도 실행 방법을 안내할 수 있습니다.
        MediaPipe는 main.js 내부에서 필요한 시점에 동적 import합니다. -->
-  <script defer src="main.js?v=20261019-5"></script>
+  <script defer src="main.js?v=20261019-6"></script>
 </body>
 </html>
