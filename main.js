@@ -41,7 +41,12 @@ const CALIBRATION_HOLD_MS = 1500; // 연속으로 안정된 손을 보여줘야 
 const CALIBRATION_TIMEOUT_MS = 20000;
 const CALIBRATION_STABILITY = 0.045; // 기준 샘플로부터 허용하는 정규화 이동 거리
 // 이착륙은 실제 항공 규정이 아닌 이 프로토타입의 훈련 판정값입니다.
-const RUNWAY = { length: 2200, width: 60, heading: 300, rotationSpeed: 70, rotationPitch: 4, maxLandingSpeed: 130, minLandingSpeed: 45, maxSink: 12, maxBank: 12, maxHeadingError: 18 };
+const RUNWAY = {
+  length:2200, width:60, heading:300, rotationSpeed:70, rotationPitch:4,
+  maxLandingSpeed:155, minLandingSpeed:35, maxSink:18, maxBank:20, maxHeadingError:28,
+  minLandingPitch:-6, maxLandingPitch:18, landingEdgeMargin:12,
+  flareSinkLimit:12 // 접지 판정을 완화해도 기존 하강 보조 강도는 유지합니다.
+};
 let MISSION_CHECKPOINTS = [
   // 활주로 앞쪽의 가까운 구역에서 짧게 좌우 이동하는 연속 코스입니다.
   { x:0, z:500, altitude:180 },
@@ -56,9 +61,9 @@ const MISSION_PROFILES = {
   "desert-base":{map:"desert-base",title:"사막 저고도 침투",difficulty:"어려움",time:"약 2분 30초",speed:[115,155],description:"낮은 목표 고도를 유지하며 기지 외곽을 통과한 뒤 정밀 착륙합니다.",checkpoints:[{x:0,z:500,altitude:130},{x:95,z:900,altitude:175},{x:-110,z:1300,altitude:220},{x:120,z:1700,altitude:165},{x:0,z:2100,altitude:130}]},
   "night-city":{map:"night-city",title:"야간 항법 비행",difficulty:"어려움",time:"약 3분",speed:[100,140],description:"도시 항법등과 HUD를 따라 제한된 시야에서 야간 접근을 완료합니다.",checkpoints:[{x:0,z:500,altitude:200},{x:-75,z:900,altitude:270},{x:65,z:1300,altitude:330},{x:-45,z:1700,altitude:270},{x:0,z:2100,altitude:200}]}
 };
-const CHECKPOINT_RADIUS = 155; // 초보 조종을 고려한 수평 통과 판정 반지름(m)
+const CHECKPOINT_RADIUS = 230; // 손 조종 오차를 허용하는 수평 통과 판정 반지름(m)
 const CHECKPOINT_VISUAL_RADIUS = 75; // 보이는 링의 물리 반지름(m). 판정 범위보다 작아 조준하기 쉽습니다.
-const CHECKPOINT_ALTITUDE_TOLERANCE = 180; // 손 조종 오차를 고려한 통과 허용 고도 차이(ft)
+const CHECKPOINT_ALTITUDE_TOLERANCE = 260; // 링 통과 시 허용하는 고도 차이(ft)
 const WIND_STREAK_START_SPEED = 70; // 이 속도부터 공기 흐름이 화면에 보이기 시작합니다.
 const STALL_ENTER_SPEED = 58; // 공중에서 이 속도 아래면 실속 경고를 켭니다.
 const STALL_EXIT_SPEED = 68; // 속도가 충분히 회복된 뒤 경고를 꺼 깜빡임을 막습니다.
@@ -335,13 +340,13 @@ function finishLesson(success, description) {
   $("flight-result").focus({ preventScroll: true });
 }
 
-function onRunway(x, z) { return Math.abs(x) <= RUNWAY.width / 2 - 3 && z >= 0 && z <= RUNWAY.length; }
+function onRunway(x, z, edgeMargin = -3) { return Math.abs(x) <= RUNWAY.width / 2 + edgeMargin && z >= 0 && z <= RUNWAY.length; }
 
 function assessTouchdown(x, z, sink) {
   const headingError = Math.min(Math.abs(angleDifference(flight.heading, RUNWAY.heading)), Math.abs(angleDifference(flight.heading, (RUNWAY.heading + 180) % 360)));
   lesson.touchdown = { x, z, sink, speed: flight.speed, pitch: flight.pitch, bank: Math.abs(flight.roll), headingError };
   if (lesson.mode === "mission" && !mission.returning) return `체크포인트 ${mission.checkpoint+1}을 통과하기 전에 착륙했습니다.`;
-  if (!onRunway(x, z)) return "활주로 밖에 접지했습니다. 중심선에 정렬하고 활주로 위에서 내려오세요.";
+  if (!onRunway(x, z, RUNWAY.landingEdgeMargin)) return "활주로 밖에 접지했습니다. 중심선에 정렬하고 활주로 위에서 내려오세요.";
   if (sink > RUNWAY.maxSink) return easyControlEnabled()
     ? "하강 속도가 너무 빨랐습니다. 접지 직전 오른손을 조금 올려 하강률을 줄이세요."
     : "하강 속도가 너무 빨랐습니다. 접지 직전 조종간을 조금 당겨 하강률을 줄이세요.";
@@ -349,7 +354,7 @@ function assessTouchdown(x, z, sink) {
   if (headingError > RUNWAY.maxHeadingError) return "활주로 방향과 크게 어긋났습니다. 방위를 300° 또는 120°에 맞추세요.";
   if (flight.speed > RUNWAY.maxLandingSpeed) return "접지 속도가 너무 높았습니다. 접근 중 스로틀을 줄여 80~100 KTS를 목표로 하세요.";
   if (flight.speed < RUNWAY.minLandingSpeed) return "접지 전 속도가 너무 낮아졌습니다. 접근 중 적당한 출력을 유지하세요.";
-  if (lesson.touchdown.pitch < -3 || lesson.touchdown.pitch > 12) return "접지 자세가 과도했습니다. 지면 가까이에서는 기수를 완만하게 들어주세요.";
+  if (lesson.touchdown.pitch < RUNWAY.minLandingPitch || lesson.touchdown.pitch > RUNWAY.maxLandingPitch) return "접지 자세가 과도했습니다. 지면 가까이에서는 기수를 완만하게 들어주세요.";
   return null;
 }
 
@@ -537,7 +542,7 @@ function updateRunwayFlight(dt) {
       const proximity=clamp(1-flight.altitude/120,0,1);
       const flareInput=clamp((flight.pitch+2)/6,0,1);
       const assist=clamp(proximity*(.6+flareInput*.4),0,1);
-      const maximumSink=lerp(RUNWAY.maxSink,4,assist);
+      const maximumSink=lerp(RUNWAY.flareSinkLimit,4,assist);
       flight.verticalSpeed=Math.max(flight.verticalSpeed,-maximumSink);
     }
     flight.altitude += flight.verticalSpeed * dt;
@@ -579,7 +584,7 @@ function updateRunwayFlight(dt) {
         ? "이륙 성공 · GATE 1 유도 마름모를 따라가세요."
         : "이륙 성공 · 고도 100 FT 통과! 선회해 돌아오거나 ‘착륙 연습’으로 접근을 시작하세요.", false, 8000);
     }
-  } else if (!onRunway(lesson.x, lesson.z)) {
+  } else if (!onRunway(lesson.x, lesson.z, lesson.phase === "rollout" ? RUNWAY.landingEdgeMargin : -3)) {
     finishLesson(false, lesson.phase === "rollout" ? "정지하기 전에 활주로를 벗어났습니다. 접지 후 출력을 내리고 제동하세요." : "이륙 전에 활주로를 벗어났습니다. 중심선을 유지하고 70 KTS 이상에서 기수를 들어주세요.");
     return;
   }
@@ -3268,7 +3273,7 @@ function updateLessonHud() {
   const desiredAltitude = Math.max(0,targetDistance) * Math.tan(radians(3)) / FEET_TO_METERS;
   const glideError = flight.altitude-desiredAltitude;
   const landing = lesson.mode === "landing" || (lesson.mode === "mission" && mission.returning) ? getLandingGuidance() : null;
-  $("runway-distance").textContent = thresholdDistance > 0 ? `${(thresholdDistance/1000).toFixed(2)} KM` : onRunway(lesson.x,lesson.z) ? `${Math.round(forward ? RUNWAY.length-lesson.z : lesson.z)} M 남음` : "활주로 밖";
+  $("runway-distance").textContent = thresholdDistance > 0 ? `${(thresholdDistance/1000).toFixed(2)} KM` : onRunway(lesson.x,lesson.z,lesson.phase === "ground" ? -3 : RUNWAY.landingEdgeMargin) ? `${Math.round(forward ? RUNWAY.length-lesson.z : lesson.z)} M 남음` : "활주로 밖";
   $("lateral-error").textContent = Math.abs(lesson.x)<2 ? "중앙" : `${lesson.x>0?"우":"좌"} ${Math.abs(lesson.x).toFixed(0)} M`;
   $("glide-error").textContent = lesson.phase !== "airborne" ? "—" : `${glideError >= 0 ? "높음" : "낮음"} ${Math.abs(glideError).toFixed(0)} FT`;
   $("target-speed").textContent = landing ? `${landing.targetSpeed} KTS` : lesson.phase === "ground" ? "70+ KTS" : "상승 유지";
