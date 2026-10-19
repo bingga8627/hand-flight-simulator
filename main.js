@@ -48,22 +48,22 @@ const RUNWAY = {
   flareSinkLimit:12 // 접지 판정을 완화해도 기존 하강 보조 강도는 유지합니다.
 };
 let MISSION_CHECKPOINTS = [
-  // 활주로 앞쪽의 가까운 구역에서 짧게 좌우 이동하는 연속 코스입니다.
+  // 충분한 간격을 둔 완만한 곡선으로 링 사이 급격한 반대 선회를 줄입니다.
   { x:0, z:500, altitude:180 },
-  { x:70, z:900, altitude:260 },
-  { x:-30, z:1300, altitude:340 },
-  { x:60, z:1700, altitude:300 },
-  { x:0, z:2100, altitude:240 }
+  { x:85, z:1100, altitude:300 },
+  { x:140, z:1800, altitude:420 },
+  { x:140, z:2600, altitude:390 },
+  { x:90, z:3500, altitude:300 }
 ];
 const MISSION_PROFILES = {
-  "mountain-city":{map:"mountain-city",title:"산악 도시 순환",difficulty:"보통",time:"약 3분",speed:[105,145],description:"산맥 아래의 굽은 항로를 따라 상승한 뒤 도시 활주로로 복귀합니다.",checkpoints:[{x:0,z:500,altitude:180},{x:85,z:900,altitude:300},{x:-75,z:1300,altitude:460},{x:105,z:1700,altitude:370},{x:0,z:2100,altitude:250}]},
-  "ocean-islands":{map:"ocean-islands",title:"군도 해상 순찰",difficulty:"쉬움",time:"약 3분",speed:[100,140],description:"섬 사이를 넓게 선회하며 해상 항로를 확인하고 공항 섬으로 돌아옵니다.",checkpoints:[{x:0,z:500,altitude:160},{x:-120,z:900,altitude:220},{x:135,z:1300,altitude:285},{x:-90,z:1700,altitude:235},{x:0,z:2100,altitude:180}]},
-  "desert-base":{map:"desert-base",title:"사막 저고도 침투",difficulty:"어려움",time:"약 2분 30초",speed:[115,155],description:"낮은 목표 고도를 유지하며 기지 외곽을 통과한 뒤 정밀 착륙합니다.",checkpoints:[{x:0,z:500,altitude:130},{x:95,z:900,altitude:175},{x:-110,z:1300,altitude:220},{x:120,z:1700,altitude:165},{x:0,z:2100,altitude:130}]},
-  "night-city":{map:"night-city",title:"야간 항법 비행",difficulty:"어려움",time:"약 3분",speed:[100,140],description:"도시 항법등과 HUD를 따라 제한된 시야에서 야간 접근을 완료합니다.",checkpoints:[{x:0,z:500,altitude:200},{x:-75,z:900,altitude:270},{x:65,z:1300,altitude:330},{x:-45,z:1700,altitude:270},{x:0,z:2100,altitude:200}]}
+  "mountain-city":{map:"mountain-city",title:"산악 도시 순환",difficulty:"보통",time:"약 3분",speed:[105,145],description:"산맥 아래의 굽은 항로를 따라 상승한 뒤 도시 활주로로 복귀합니다.",checkpoints:[{x:0,z:500,altitude:180},{x:85,z:1100,altitude:300},{x:140,z:1800,altitude:420},{x:140,z:2600,altitude:390},{x:90,z:3500,altitude:300}]},
+  "ocean-islands":{map:"ocean-islands",title:"군도 해상 순찰",difficulty:"쉬움",time:"약 3분",speed:[100,140],description:"섬 사이를 넓게 선회하며 해상 항로를 확인하고 공항 섬으로 돌아옵니다.",checkpoints:[{x:0,z:500,altitude:160},{x:-100,z:1100,altitude:220},{x:-170,z:1800,altitude:280},{x:-190,z:2600,altitude:250},{x:-160,z:3500,altitude:190}]},
+  "desert-base":{map:"desert-base",title:"사막 저고도 침투",difficulty:"어려움",time:"약 2분 30초",speed:[115,155],description:"낮은 목표 고도를 유지하며 기지 외곽을 통과한 뒤 정밀 착륙합니다.",checkpoints:[{x:0,z:500,altitude:130},{x:95,z:1100,altitude:175},{x:160,z:1800,altitude:220},{x:180,z:2600,altitude:180},{x:140,z:3500,altitude:140}]},
+  "night-city":{map:"night-city",title:"야간 항법 비행",difficulty:"어려움",time:"약 3분",speed:[100,140],description:"도시 항법등과 HUD를 따라 제한된 시야에서 야간 접근을 완료합니다.",checkpoints:[{x:0,z:500,altitude:200},{x:-75,z:1100,altitude:270},{x:-125,z:1800,altitude:330},{x:-140,z:2600,altitude:290},{x:-110,z:3500,altitude:220}]}
 };
-const CHECKPOINT_RADIUS = 230; // 손 조종 오차를 허용하는 수평 통과 판정 반지름(m)
+const CHECKPOINT_RADIUS = 155; // 손 조종 오차를 허용하는 수평 통과 판정 반지름(m)
 const CHECKPOINT_VISUAL_RADIUS = 75; // 보이는 링의 물리 반지름(m). 판정 범위보다 작아 조준하기 쉽습니다.
-const CHECKPOINT_ALTITUDE_TOLERANCE = 260; // 링 통과 시 허용하는 고도 차이(ft)
+const CHECKPOINT_ALTITUDE_TOLERANCE = 180; // 링 통과 시 허용하는 고도 차이(ft)
 const WIND_STREAK_START_SPEED = 70; // 이 속도부터 공기 흐름이 화면에 보이기 시작합니다.
 const STALL_ENTER_SPEED = 58; // 공중에서 이 속도 아래면 실속 경고를 켭니다.
 const STALL_EXIT_SPEED = 68; // 속도가 충분히 회복된 뒤 경고를 꺼 깜빡임을 막습니다.
