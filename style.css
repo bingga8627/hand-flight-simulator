@@ -21,3 +21,4 @@
 #flight-canvas{z-index:1;pointer-events:none}
 .flight>:not(#flight-canvas){z-index:2}
 .performance-button{padding:5px 8px;font:10px Consolas,monospace;color:#9fb9ad;background:#14262a;border-color:#6f958b55}.performance-button[aria-pressed="true"]{color:var(--green);border-color:#b4f6ae8a}.performance-status{color:var(--green);font:10px Consolas,monospace}.performance-status[hidden]{display:none}
+.quality-control{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}.quality-control select{padding:4px 6px;border:1px solid #38515a;border-radius:4px;background:#0a151d;color:var(--green);font:inherit}.quality-control select:focus-visible{outline:2px solid var(--green);outline-offset:3px}

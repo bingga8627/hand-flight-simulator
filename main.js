@@ -92,7 +92,8 @@ const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("flight-canvas");
-const ctx = canvas.getContext("2d");
+// 배경은 매 프레임 불투명하게 채우므로 합성용 알파 버퍼가 필요하지 않습니다.
+const ctx = canvas.getContext("2d", { alpha:false });
 const video = $("webcam");
 const landmarkCanvas = $("landmark-canvas");
 const landmarkCtx = landmarkCanvas.getContext("2d");
@@ -117,8 +118,28 @@ let selectedMissionId = (()=>{try{const saved=localStorage.getItem("aeronaut-mis
 // 이전 Google 버전에서 브라우저에 저장했을 수 있는 키도 업그레이드 즉시 삭제합니다.
 try{localStorage.removeItem("aeronaut-google-map-key");localStorage.removeItem("aeronaut-real-earth");}catch{}
 const terrainTextures={};
+const terrainSurfaces={};
+const RENDER_QUALITY={
+  balanced:{dpr:1.5,pixels:2000000,slices:28,clouds:8},
+  low:{dpr:1,pixels:1000000,slices:18,clouds:5},
+  high:{dpr:2,pixels:Infinity,slices:44,clouds:18}
+};
+let renderQuality=(()=>{try{const saved=localStorage.getItem("aeronaut-quality");return Object.hasOwn(RENDER_QUALITY,saved)?saved:"balanced";}catch{return "balanced";}})();
 // 지형 모양은 월드 좌표가 바뀌기 전까지 재사용합니다. 오래된 구역은 제거해 메모리 증가를 막습니다.
-const sceneryCache={islands:new Map(),districts:new Map(),regionalCities:new Map(),roads:new Map(),relief:new Map()};
+const sceneryCache={islands:new Map(),districts:new Map(),regionalCities:new Map(),roads:new Map(),relief:new Map(),clouds:new Map()};
+let terrainStripLayout={height:0,slices:0,imageHeight:0,rows:[]};
+const windStreakDirections=Array.from({length:30},(_,i)=>{
+  const angle=(i*2.399963+Math.sin(i*12.73)*.24)%(Math.PI*2);
+  return {cos:Math.cos(angle),sin:Math.sin(angle)};
+});
+// 개수와 모양이 고정된 효과는 좌표의 씨앗과 색을 한 번만 계산합니다.
+const rainParticles=Array.from({length:105},(_,i)=>{
+  const speed=.42+sceneryNoise(i*4.31)*.72;
+  return {speed,x:sceneryNoise(i*2.73),y:sceneryNoise(i*7.51),length:10+speed*22,color:`rgba(205,230,235,${.12+speed*.25})`};
+});
+const rainDroplets=Array.from({length:14},(_,i)=>({phase:sceneryNoise(i)*1.3,x:sceneryNoise(i*14.1),y:sceneryNoise(i*8.3),radius:2+sceneryNoise(i*3.9)*5}));
+const skyStars=Array.from({length:65},(_,i)=>({x:sceneryNoise(i*4.31),y:sceneryNoise(i*7.19),size:sceneryNoise(i*2.07)>.88?1.6:.7,color:`rgba(220,239,225,${.25+sceneryNoise(i*9.7)*.6})`}));
+const navigationStars=Array.from({length:8},(_,i)=>({x:sceneryNoise(i*18.2),y:sceneryNoise(i*13.7),size:2+sceneryNoise(i)*2}));
 function rememberScenery(cache,key,create,limit=96) {
   if(cache.has(key))return cache.get(key);
   const value=create();cache.set(key,value);
@@ -128,7 +149,18 @@ function rememberScenery(cache,key,create,limit=96) {
 const performanceStats={visible:false,frames:0,lastReport:0,fps:0,renderMs:0,inferenceMs:0};
 function terrainTexture(map) {
   if(terrainTextures[map])return terrainTextures[map];
-  const image=new Image();image.decoding="async";image.src=TERRAIN_TEXTURE_URLS[map];
+  const image=new Image();image.decoding="async";
+  image.onload=()=>{
+    // 각 띠를 그릴 때마다 필터를 실행하지 않고 맵당 한 번만 색을 보정합니다.
+    const surface=document.createElement("canvas");
+    surface.width=image.naturalWidth;surface.height=image.naturalHeight;
+    const context=surface.getContext("2d");
+    if(!context||!("filter" in context))return;
+    context.filter=MAP_THEMES[map].night?"contrast(1.16) brightness(.86) saturate(.86)":"contrast(1.12) saturate(.94)";
+    context.drawImage(image,0,0);
+    terrainSurfaces[map]=surface;
+  };
+  image.src=TERRAIN_TEXTURE_URLS[map];
   terrainTextures[map]=image;return image;
 }
 // 기준 위치는 현재 카메라 연결 동안만 유지합니다. 이미지나 랜드마크는 저장하지 않습니다.
@@ -1085,11 +1117,15 @@ function updateFlightEffects(now) {
 // 7단계: Canvas 2D 배경만 움직여 1인칭 시야를 만듭니다. 실제 3D 엔진은 없습니다.
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
-  width = rect.width; height = rect.height;
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+  const layoutChanged=width!==rect.width||height!==rect.height;
+  width = Math.max(1,rect.width); height = Math.max(1,rect.height);
+  const quality=RENDER_QUALITY[renderQuality];
+  dpr = Math.min(window.devicePixelRatio || 1, quality.dpr, Math.sqrt(quality.pixels/(width*height)));
+  const pixelWidth=Math.max(1,Math.floor(width*dpr)),pixelHeight=Math.max(1,Math.floor(height*dpr));
+  if(canvas.width!==pixelWidth)canvas.width=pixelWidth;
+  if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
   // 크기가 바뀌는 도중 의도치 않은 조종 입력을 방지합니다.
-  releaseStick();
+  if(layoutChanged)releaseStick();
 }
 function path(points, fill, stroke) {
   ctx.beginPath(); points.forEach(([x,y], i) => i ? ctx.lineTo(x,y) : ctx.moveTo(x,y));
@@ -1097,6 +1133,7 @@ function path(points, fill, stroke) {
 }
 function drawWorld(now) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // 기울어진 수평선의 안티앨리어싱 경계에 이전 프레임이 비치지 않도록 초기화합니다.
   ctx.clearRect(0, 0, width, height);
   ctx.save();
   ctx.translate(width / 2, height * 0.46);
@@ -1122,12 +1159,14 @@ function drawWorld(now) {
 
   drawCloudField(theme,now,weather);
   drawTerrainImage(theme,extent);
-  drawTerrainRelief(theme);
-  if(terrainReady) drawWorldDetailOverlay(theme);
+  if(renderQuality!=="low")drawTerrainRelief(theme);
+  if(terrainReady&&renderQuality!=="low") drawWorldDetailOverlay(theme);
   drawRegionalGround(theme);
   drawTerrainTexture(theme);
-  drawOuterWorld(theme,now);
-  drawRegionalLandmarks(theme,now);
+  if(renderQuality!=="low") {
+    drawOuterWorld(theme,now);
+    drawRegionalLandmarks(theme,now);
+  }
 
   // 지면의 원근 격자와 패치가 전진감을 줍니다. 고도에 따라 격자 크기도 완만히 변합니다.
   const scale = clamp(2400 / (flight.altitude + 400), 0.35, 2);
@@ -1156,7 +1195,7 @@ function drawWorld(now) {
   ctx.strokeStyle = "#d7e8cb77"; ctx.beginPath(); ctx.moveTo(-extent,0); ctx.lineTo(extent,0); ctx.stroke();
   drawPitchLadder();
   ctx.restore();
-  drawMapColorGrade(theme);
+  if(renderQuality!=="low")drawMapColorGrade(theme);
   drawWeatherEffects(now,weather);
   drawWindStreaks(now);
   if (lesson.mode === "mission" && !mission.returning) drawCheckpointNavigator();
@@ -1167,7 +1206,7 @@ function drawWorld(now) {
 function drawCloudField(theme,now,weather) {
   const band=width*3.2;
   ctx.save();
-  const cloudCount=Math.min(18,Math.round(11*weather.clouds));
+  const cloudCount=Math.min(RENDER_QUALITY[renderQuality].clouds,Math.round(11*weather.clouds));
   for(let i=0;i<cloudCount;i++) {
     const phase=((i*347+now*(.0014+(i%3)*.00035)+flight.heading*5.6)%band)-band/2;
     const y=-62-(i%4)*height*.145-sceneryNoise(i*4.8)*28;
@@ -1179,9 +1218,12 @@ function drawCloudField(theme,now,weather) {
     shadow.addColorStop(.55,`rgba(${theme.cloud},${alpha})`);
     shadow.addColorStop(1,`rgba(${theme.cloud},0)`);
     ctx.fillStyle=shadow;ctx.beginPath();ctx.ellipse(phase,y,size*3.6,size*.78,0,0,Math.PI*2);ctx.fill();
-    for(let puff=0;puff<4;puff++) {
-      const px=phase+(puff-1.5)*size*.82,py=y-size*(.08+sceneryNoise(i*7+puff)*.3);
-      const pr=size*(.72+sceneryNoise(i*13+puff)*.48);
+    const puffs=rememberScenery(sceneryCache.clouds,i,()=>Array.from({length:4},(_,puff)=>({
+      x:(puff-1.5)*size*.82,y:-size*(.08+sceneryNoise(i*7+puff)*.3),radius:size*(.72+sceneryNoise(i*13+puff)*.48)
+    })),18);
+    for(let puff=0;puff<(renderQuality==="low"?1:4);puff++) {
+      const px=phase+puffs[puff].x,py=y+puffs[puff].y;
+      const pr=puffs[puff].radius;
       const glow=ctx.createRadialGradient(px-pr*.2,py-pr*.3,0,px,py,pr);
       glow.addColorStop(0,`rgba(${theme.cloud},${alpha*1.8})`);glow.addColorStop(1,`rgba(${theme.cloud},0)`);
       ctx.fillStyle=glow;ctx.beginPath();ctx.ellipse(px,py,pr*1.35,pr*.72,0,0,Math.PI*2);ctx.fill();
@@ -1224,20 +1266,20 @@ function drawWeatherEffects(now,weather) {
   if(weather.rain) {
     const gust=Math.sin(now*.0017)*13;
     ctx.lineWidth=1;ctx.lineCap="round";
-    for(let i=0;i<105;i++) {
-      const seed=sceneryNoise(i*9.17),speed=.42+sceneryNoise(i*4.31)*.72;
-      const x=(sceneryNoise(i*2.73)*width+now*speed*.18+gust*i*.03)%(width+100)-50;
-      const y=(sceneryNoise(i*7.51)*height+now*speed*.52)%(height+90)-45;
-      const length=10+speed*22;
-      ctx.strokeStyle=`rgba(205,230,235,${.12+speed*.25})`;
+    for(let i=0;i<(renderQuality==="low"?30:105);i++) {
+      const particle=rainParticles[i],{speed,length}=particle;
+      const x=(particle.x*width+now*speed*.18+gust*i*.03)%(width+100)-50;
+      const y=(particle.y*height+now*speed*.52)%(height+90)-45;
+      ctx.strokeStyle=particle.color;
       ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-4-gust*.08,y+length);ctx.stroke();
     }
     // 유리 표면의 큰 물방울은 가장자리만 그려 HUD 판독성을 유지합니다.
     ctx.strokeStyle="#d9edf136";ctx.lineWidth=1.1;
     for(let i=0;i<14;i++) {
-      const phase=(now*.000045*(.7+i%4)+sceneryNoise(i)*1.3)%1;
-      const x=sceneryNoise(i*14.1)*width,y=(sceneryNoise(i*8.3)*height+phase*height*.28)%height;
-      const r=2+sceneryNoise(i*3.9)*5;
+      const droplet=rainDroplets[i];
+      const phase=(now*.000045*(.7+i%4)+droplet.phase)%1;
+      const x=droplet.x*width,y=(droplet.y*height+phase*height*.28)%height;
+      const r=droplet.radius;
       ctx.beginPath();ctx.arc(x,y,r,.15,Math.PI*1.55);ctx.stroke();
     }
     const flash=Math.pow(Math.max(0,Math.sin(now*.00023*7.3)-.992)*125,2);
@@ -1245,7 +1287,7 @@ function drawWeatherEffects(now,weather) {
   }
   if(weather.fog) {
     // 서로 다른 속도의 안개 띠가 천천히 흘러 정적인 흰 막처럼 보이지 않게 합니다.
-    for(let i=0;i<5;i++) {
+    for(let i=0;i<(renderQuality==="low"?2:5);i++) {
       const x=((now*.004*(i+1)+i*311)%(width*1.7))-width*.35;
       const y=height*(.28+i*.12),rx=width*(.25+i*.035);
       const mist=ctx.createRadialGradient(x,y,0,x,y,rx);
@@ -1267,39 +1309,52 @@ function drawTerrainImage(theme,extent) {
   // 선택한 맵만 내려받아 첫 접속에서 네 장의 큰 이미지를 동시에 요청하지 않습니다.
   const image=terrainTexture(worldMap);
   if(!image||!image.complete||!image.naturalWidth)return;
-  const slices=44,sourceHeight=image.naturalHeight/slices;
+  const source=terrainSurfaces[worldMap]||image;
+  const slices=RENDER_QUALITY[renderQuality].slices,sourceHeight=image.naturalHeight/slices;
+  if(terrainStripLayout.height!==height||terrainStripLayout.slices!==slices||terrainStripLayout.imageHeight!==image.naturalHeight) {
+    terrainStripLayout={height,slices,imageHeight:image.naturalHeight,rows:Array.from({length:slices},(_,index)=>{
+      const near=index/slices,far=(index+1)/slices;
+      return {yNear:near*near*height*1.85,yFar:far*far*height*1.85+1,sourceOffset:index*sourceHeight,alpha:.12+far*.88};
+    })};
+  }
   // 별도 애니메이션 값을 섞지 않고 실제 월드 위치에만 고정합니다. 전진하면 지형 특징이 조종석 방향으로 이동합니다.
   const forward=((-lesson.z*.16)%image.naturalHeight+image.naturalHeight)%image.naturalHeight;
   const lateral=((lesson.x*.13)%image.naturalWidth+image.naturalWidth)%image.naturalWidth;
   const horizontalPhase=lateral/image.naturalWidth;
+  // Roll/Pitch를 역변환한 화면 범위 밖의 띠와 타일은 그리지 않습니다.
+  const angle=radians(flight.roll),cos=Math.cos(angle),sin=Math.sin(angle);
+  const centerX=-sin*height*.04,centerY=cos*height*.04-flight.pitch*height*.012;
+  const halfX=Math.abs(cos)*width/2+Math.abs(sin)*height/2+2;
+  const halfY=Math.abs(sin)*width/2+Math.abs(cos)*height/2+2;
+  const minX=centerX-halfX,maxX=centerX+halfX,minY=centerY-halfY,maxY=centerY+halfY;
   ctx.save();
-  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality=renderQuality==="high"?"high":"low";
   const baseAlpha=worldMap==="night-city"?.68:worldMap==="ocean-islands"?.72:.64;
-  ctx.filter=theme.night?"contrast(1.16) brightness(.86) saturate(.86)":"contrast(1.12) saturate(.94)";
+  ctx.filter=source===image?(theme.night?"contrast(1.16) brightness(.86) saturate(.86)":"contrast(1.12) saturate(.94)"):"none";
   ctx.globalCompositeOperation="source-over";
-  for(let index=0;index<slices;index++) {
-    const near=index/slices,far=(index+1)/slices;
-    const yNear=near*near*height*1.85,yFar=far*far*height*1.85+1;
+  for(const row of terrainStripLayout.rows) {
+    const {yNear,yFar}=row;
+    if(yFar<minY||yNear>maxY)continue;
     // 지면은 시야 전체에 이어져야 하므로 중앙의 삼각형 영역으로 자르지 않습니다.
     // 세로 띠의 비선형 높이만으로 거리감을 만들고, 월드 지표와 도로가 소실점을 보여줍니다.
     const nearHalf=extent,farHalf=extent;
-    const sourceY=(forward+index*sourceHeight)%image.naturalHeight;
+    const sourceY=(forward+row.sourceOffset)%image.naturalHeight;
     const sampleHeight=sourceHeight+1.5;
     const firstHeight=Math.min(sampleHeight,image.naturalHeight-sourceY);
     ctx.save();
     // 멀리 있는 지표는 대기 산란으로 색과 명암이 약해지고 가까운 지표만 선명하게 보입니다.
-    ctx.globalAlpha=baseAlpha*(.12+far*.88);
-    ctx.beginPath();ctx.moveTo(-nearHalf,yNear);ctx.lineTo(nearHalf,yNear);
-    ctx.lineTo(farHalf,yFar);ctx.lineTo(-farHalf,yFar);ctx.closePath();ctx.clip();
+    ctx.globalAlpha=baseAlpha*row.alpha;
+    ctx.beginPath();ctx.rect(-nearHalf,yNear,nearHalf*2,yFar-yNear);ctx.clip();
     const stripWidth=farHalf*2,shift=horizontalPhase*stripWidth,destinationHeight=yFar-yNear+2;
     // 수평 오프셋은 항상 오른쪽으로 감기므로 화면을 덮는 띠는 0번과 1번뿐입니다.
     // 화면 밖의 -1번 띠를 매 프레임 그리지 않아 drawImage 호출을 약 1/3 줄입니다.
     for(let tile=0;tile<=1;tile++) {
       const destinationX=-farHalf-shift+tile*stripWidth;
+      if(destinationX>maxX||destinationX+stripWidth<minX)continue;
       const firstDestinationHeight=destinationHeight*(firstHeight/sampleHeight);
-      ctx.drawImage(image,0,sourceY,image.naturalWidth,firstHeight,destinationX,yNear,stripWidth,firstDestinationHeight);
+      ctx.drawImage(source,0,sourceY,image.naturalWidth,firstHeight,destinationX,yNear,stripWidth,firstDestinationHeight);
       const remainder=sampleHeight-firstHeight;
-      if(remainder>.1)ctx.drawImage(image,0,0,image.naturalWidth,remainder,destinationX,yNear+firstDestinationHeight,stripWidth,destinationHeight-firstDestinationHeight);
+      if(remainder>.1)ctx.drawImage(source,0,0,image.naturalWidth,remainder,destinationX,yNear+firstDestinationHeight,stripWidth,destinationHeight-firstDestinationHeight);
     }
     ctx.restore();
   }
@@ -2455,17 +2510,16 @@ function drawMountainRanges(extent,theme) {
 
 function drawNightSky(extent) {
   ctx.save();
-  for(let i=0;i<65;i++) {
-    const band=extent*2,x=((sceneryNoise(i*4.31)*band+flight.heading*8)%band)-extent;
-    const y=-18-sceneryNoise(i*7.19)*height*.92;
-    const size=sceneryNoise(i*2.07)>.88?1.6:.7;
-    ctx.fillStyle=`rgba(220,239,225,${.25+sceneryNoise(i*9.7)*.6})`;ctx.fillRect(x,y,size,size);
+  for(const star of skyStars) {
+    const band=extent*2,x=((star.x*band+flight.heading*8)%band)-extent;
+    const y=-18-star.y*height*.92;
+    ctx.fillStyle=star.color;ctx.fillRect(x,y,star.size,star.size);
   }
   // 낮은 별보다 밝은 몇 개의 항법 기준 별을 십자 광채로 표시합니다.
   ctx.strokeStyle="#dff6df88";ctx.lineWidth=.7;
-  for(let i=0;i<8;i++) {
-    const x=(sceneryNoise(i*18.2)*extent*2+flight.heading*5)% (extent*2)-extent;
-    const y=-45-sceneryNoise(i*13.7)*height*.75,s=2+sceneryNoise(i)*2;
+  for(const star of navigationStars) {
+    const x=(star.x*extent*2+flight.heading*5)% (extent*2)-extent;
+    const y=-45-star.y*height*.75,s=star.size;
     ctx.beginPath();ctx.moveTo(x-s,y);ctx.lineTo(x+s,y);ctx.moveTo(x,y-s);ctx.lineTo(x,y+s);ctx.stroke();
   }
   ctx.restore();
@@ -2708,11 +2762,10 @@ function drawWindStreaks(now) {
   const cx=width*.5,cy=height*.46,maxRadius=Math.hypot(width,height)*.58;
   ctx.save();ctx.lineCap="round";ctx.lineWidth=.7+intensity*1.15;
   for(let i=0;i<30;i++) {
-    const angle=(i*2.399963+Math.sin(i*12.73)*.24)%(Math.PI*2);
     const phase=(now*.00022*(.55+flight.speed/150)+i*.173)%1;
     const radius=28+Math.pow(phase,1.7)*maxRadius;
     const length=(5+phase*46)*intensity;
-    const cos=Math.cos(angle),sin=Math.sin(angle);
+    const {cos,sin}=windStreakDirections[i];
     ctx.strokeStyle=`rgba(219,238,228,${(.025+phase*.18)*intensity})`;
     ctx.beginPath();ctx.moveTo(cx+cos*radius,cy+sin*radius);ctx.lineTo(cx+cos*(radius+length),cy+sin*(radius+length));ctx.stroke();
   }
@@ -3435,6 +3488,13 @@ $("performance-button").addEventListener("click",()=>{
   performanceStats.frames=0;performanceStats.lastReport=0;performanceStats.renderMs=0;
   $("performance-button").setAttribute("aria-pressed",String(performanceStats.visible));
   $("performance-status").hidden=!performanceStats.visible;
+});
+$("render-quality").value=renderQuality;
+$("render-quality").addEventListener("change",event=>{
+  if(!Object.hasOwn(RENDER_QUALITY,event.target.value))return;
+  renderQuality=event.target.value;
+  try{localStorage.setItem("aeronaut-quality",renderQuality);}catch{}
+  resizeCanvas();
 });
 $("camera-select").addEventListener("change", () => {
   if (connectionStage === "camera" || connectionStage === "model") return;
